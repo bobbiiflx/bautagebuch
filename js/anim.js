@@ -1123,7 +1123,173 @@ async function sanitaer(ctx) {
   await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
 }
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar };
+// ---------- Außenarbeiten: Dämmung (A) und Fassade (A) – gemeinsames Gerüst-Gerüst ----------
+const makeSkirtScaffold = (fx) => {
+  const g = grp('geruest-aussen'); fx.add(g);
+  const X0 = -7.9, X1 = 8.74, ZF = 8.45, ZB = -0.3;
+  const posts = [];
+  const post = (x, z) => { const p = bx(0.1, 1, 0.1, 0x9aa1a8, { outline: false }); g.add(p); posts.push({ p, x, z }); };
+  for (let x = X0; x <= X1 + 0.01; x += 2.6) { post(x, ZF); post(x, ZF + 0.9); }
+  for (let z = ZF - 2.6; z >= ZB - 0.01; z -= 2.6) { post(X1, z); post(X1 + 0.9, z); }
+  post(X1 + 0.9, ZF + 0.9);
+  const decks = [];
+  const mkDeck = () => {
+    const d = grp('belag');
+    d.add(bx(X1 - X0, 0.08, 0.9, 0xc8964f).at((X0 + X1) / 2, 0, ZF + 0.45), bx(0.9, 0.08, ZF - ZB, 0xc8964f).at(X1 + 0.45, 0, (ZF + ZB) / 2));
+    d.add(bx(X1 - X0, 0.05, 0.05, 0x9aa1a8, { outline: false }).at((X0 + X1) / 2, 1.0, ZF + 0.9), bx(0.05, 0.05, ZF - ZB, 0x9aa1a8, { outline: false }).at(X1 + 0.9, 1.0, (ZF + ZB) / 2));
+    g.add(d); decks.push(d); return d;
+  };
+  const d1 = mkDeck(), d2 = mkDeck();
+  // f in 0..1: Plattformen und Stützen wachsen mit dem Fortschritt mit
+  const set = (f) => {
+    const y1 = 0.6 + 0.25 + 1.5 * f, y2 = 3.3 + 0.2 + 1.0 * f;
+    d1.pos[1] = y1; d2.pos[1] = y2;
+    const top = y2 + 1.5;
+    posts.forEach(({ p, x, z }) => { p.size(1, top, 1).at(x, top / 2 - 0.1, z); });
+    return [y1, y2];
+  };
+  set(0);
+  return { g, set, X0, X1, ZF, ZB };
+};
+const makeInsulPallet = (c = 0xf2c94c) => {
+  const g = grp('daemmpalette');
+  g.add(bx(1.7, 0.16, 1.1, 0xc8964f).at(0, 0.08, 0));
+  for (let i = 0; i < 5; i++) g.add(bx(1.5, 0.18, 0.9, i % 2 ? c : 0xe2b83a).at(0, 0.25 + i * 0.19, 0));
+  g.add(bx(1.52, 0.03, 0.92, 0x2f7be0).at(0, 0.5, 0));
+  return g;
+};
+const makePlasterMachine = () => {
+  const g = grp('putzmaschine');
+  g.add(bx(1.2, 0.7, 0.8, 0x4a4f58).at(0, 0.55, 0), bx(0.9, 0.5, 0.6, 0xf2a900).at(0, 1.15, 0));
+  const hop = cy(0.45, 0.28, 0.45, 0xb9bec6, 8).at(0.15, 1.65, 0); g.add(hop);
+  for (const x of [-0.45, 0.45]) g.add(cy(0.22, 0.22, 0.1, 0x2b2e34, 10).rotate(Math.PI / 2, 0, 0).at(x, 0.22, 0.45), cy(0.22, 0.22, 0.1, 0x2b2e34, 10).rotate(Math.PI / 2, 0, 0).at(x, 0.22, -0.45));
+  g.add(bx(0.1, 0.1, 0.9, 0x2b2e34).at(-0.55, 0.5, 0));
+  return g;
+};
+async function aussenArbeit(ctx, kind) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff, toss } = T;
+  const dae = kind === 'daemmung';
+  const outside = new Node(null); fx.add(outside);
+  house.setView('aussen');
+  if (!dae) house.setProgress({ ...house.state.p, daemmung: 100 });
+  const setF = (f) => house.setProgress({ ...house.state.p, [kind]: Math.max(0.01, f * 100) });
+  setF(0);
+  // 1) Transporter bringt Material
+  const van = makeVan(dae ? 0xf4f1ea : 0xf0dfba, dae ? 0xf2c94c : 0x7a5a36); van.at(-14, STREET_Y, 15.4); outside.add(van);
+  engine.flyTo({ az: 0.25, el: 0.3, r: 34, target: [0, 2, 9] }, S(1400));
+  await driveTo(van, [-1.0, STREET_Y, 15.4], 3000, ease.out, false);
+  const c1 = mk(LOOKS.bau, 0.6, STREET_Y, 14.0, outside), c2 = mk(LOOKS.bauin, 1.6, STREET_Y, 14.4, outside);
+  const matX = dae ? 3.8 : -3.6;
+  const mat = dae ? makeInsulPallet() : makePlasterMachine();
+  outside.add(mat); mat.at(matX, terrainY(11.0), 11.0); mat.size(0.001, 0.001, 0.001);
+  await tw(700, (t) => { const k = ease.out(t); mat.size(k, k, k); mat.pos[1] = terrainY(11.0) + (1 - k) * 2; });
+  puff([matX, 0.4, 11.0], 5, 0.7);
+
+  // 2) Gerüst wächst
+  const sc = makeSkirtScaffold(outside);
+  const [x0, x1] = [sc.X0, sc.X1];
+  const worker = (look, x, z) => { const w = mk(look, x, STREET_Y, z, outside); return w; };
+  const wA = c1, wB = c2;
+  walkTo(wA, [matX + (dae ? -1.4 : 1.4), null, 10.0], { speed: 2.6 });
+  await tw(1800, (t) => { sc.set(0); sc.g.size(1, ease.out(t), 1); });
+  sc.g.size(1, 1, 1);
+  engine.flyTo({ az: 0.3, el: 0.22, r: 24, target: [-1, 3, 8] }, S(1300));
+  const [yA0, yB0] = sc.set(0);
+  wA.root.pos = [matX - 2, 0.6, 8.9]; wB.root.pos = [x0 + 3.0, yB0 - 0.04, 8.9];
+  // Handwerkzeug
+  let tool1 = null, tool2 = null;
+  if (!dae) {
+    tool1 = grp('rolle'); tool1.add(bx(0.05, 1.0, 0.05, 0x8a5a36).at(0, 0.3, 0), cy(0.1, 0.1, 0.5, 0xf6efe0, 8).rotate(0, 0, Math.PI / 2).at(0, 0.82, 0));
+    wA.hold.add(tool1);
+    tool2 = grp('kelle'); tool2.add(bx(0.3, 0.04, 0.2, 0xb9bec6).at(0.05, 0.1, 0), bx(0.04, 0.2, 0.04, 0x8a5a36).at(-0.1, 0.0, 0));
+    wB.hold.add(tool2);
+  }
+  // Schlauch der Putzmaschine: senkrecht am Gerüst, wächst mit
+  let hose = null;
+  if (!dae) { hose = bx(0.07, 1, 0.07, 0x2b2e34, { outline: false }); outside.add(hose); }
+  faceDir(wA.root, 0, -1); faceDir(wB.root, 0, -1);
+
+  // 3) Arbeiten Reihe für Reihe (Platten klappen an bzw. Putz wird gerollt), von unten nach oben
+  const N = 30;
+  const fly = (from, to, cb) => {
+    const p = dae ? bx(1.1, 0.55, 0.1, C_INS) : bx(0.8, 0.5, 0.05, 0xf0dfba, { outline: false });
+    outside.add(p); p.at(...from);
+    if (dae) p.rot[0] = -0.5;
+    return tw(dae ? 520 : 380, (t) => {
+      const q = arc(from, to, dae ? 1.1 : 0.5, t);
+      p.pos[0] = q[0]; p.pos[1] = q[1]; p.pos[2] = q[2];
+      if (dae) { p.rot[0] = lerp(-0.5, 0, ease.out(t)); p.rot[2] = Math.sin(t * 6) * 0.25 * (1 - t); }
+      else p.size(1 - t * 0.6, 1, 1);
+    }).then(() => { outside.remove(p); cb && cb(); });
+  };
+  const C_INS = 0xf2c94c;
+  let side = 'front';
+  for (let k = 1; k <= N; k++) {
+    const f = k / N;
+    if (side === 'front' && f > 0.52) {
+      side = 'gable';
+      engine.flyTo({ az: 1.0, el: 0.22, r: 24, target: [5, 3.5, 4] }, S(1600));
+      const [yA, yB] = sc.set(f);
+      walkTo(wA, [x1 + 0.45, yA, 7.4], { speed: 2.6 }); walkTo(wB, [x1 + 0.45, yB, 3.2], { speed: 2.6 });
+      await wait(900);
+    }
+    const [yA, yB] = sc.set(f);
+    if (side === 'front') {
+      const xa = lerp(-3.6, 5.5, (k % 5) / 4), xb = lerp(-6.2, 4.5, ((k * 3) % 7) / 6);
+      wA.root.pos[1] = yA; wB.root.pos[1] = yB;
+      walkTo(wA, [xa, yA, 8.9], { speed: 2.2 }); walkTo(wB, [xb, yB, 8.9], { speed: 2.2 });
+      faceDir(wA.root, 0, -1); faceDir(wB.root, 0, -1);
+      const tgtA = [xa, yA + 1.1, 7.4], tgtB = [xb, yB + 1.0, 7.4];
+      if (dae) {
+        fly([matX, 1.0, 11.0], tgtA); fly([matX + 0.4, 1.1, 11.0], tgtB, () => burst(tgtB, 3, 0xffffff, 1.2, 300));
+      } else {
+        fly([matX, 1.9, 11.0], tgtA); fly([matX, 1.9, 11.0], tgtB);
+        if (hose) { hose.size(1, yB + 1.2, 1); hose.pos[0] = matX + 0.2; hose.pos[1] = (yB + 1.2) / 2; hose.pos[2] = 9.9; }
+      }
+      setPose(wA, { ...POSES.push, rArm: 1.3 + Math.sin(k) * 0.5, lean: 0.3 });
+      setPose(wB, { ...POSES.push, lArm: 1.2 + Math.cos(k * 1.3) * 0.5, lean: 0.25 });
+    } else {
+      wA.root.pos[1] = yA; wB.root.pos[1] = yB;
+      const za = lerp(7.4, 0.4, (k % 5) / 4), zb = lerp(5, -0.1, ((k * 3) % 7) / 6);
+      walkTo(wA, [x1 + 0.45, yA, za], { speed: 2.2 }); walkTo(wB, [x1 + 0.45, yB, zb], { speed: 2.2 });
+      faceDir(wA.root, -1, 0); faceDir(wB.root, -1, 0);
+      fly([matX + 2, 1.2, 11.0], [x1 - 0.6, yA + 1.0, za]); fly([matX + 2, 1.2, 11.0], [x1 - 0.6, yB + 1.0, zb]);
+      if (hose) { hose.pos[0] = x1 + 1.0; hose.pos[2] = 9.3; hose.size(1, yB + 1.2, 1); hose.pos[1] = (yB + 1.2) / 2; }
+      setPose(wA, { ...POSES.push, rArm: 1.3 + Math.sin(k) * 0.5, lean: 0.3 }); setPose(wB, { ...POSES.push, lArm: 1.2 + Math.cos(k * 1.3) * 0.5, lean: 0.25 });
+    }
+    await wait(250);
+    setF(f);
+    burst([side === 'front' ? lerp(-5, 6, (k % 7) / 6) : x1 - 0.7, yA + 1.0, side === 'front' ? 7.6 : lerp(6, 0, (k % 5) / 4)], 3, dae ? 0xffe9a0 : 0xf5e8c8, 1.4, 350);
+    if (k === 20) engine.flyTo({ az: 0.55, el: 0.25, r: 26, target: [2, 4, 4] }, S(1600));
+    await wait(110);
+  }
+  setF(1);
+  // 4) Finale: Gerüst fällt zusammen, Jubel
+  if (hose) outside.remove(hose);
+  if (tool1) wA.hold.remove(tool1);
+  if (tool2) wB.hold.remove(tool2);
+  const [yA, yB] = sc.set(1);
+  setPose(wA, POSES.wave(0)); setPose(wB, POSES.thumbs);
+  burst([4, yB + 1.5, 6], 26, dae ? 0xf2c94c : 0xf0dfba, 4.5, 1000, 0.1);
+  await wait(600);
+  await Promise.all([
+    tw(1000, (t) => { sc.g.size(1, 1 - ease.in(t), 1); wA.root.pos[1] = lerp(yA, 0.6, t); wB.root.pos[1] = lerp(yB, 0.6, t); }),
+    walkTo(wA, [x1 + 0.5, 0.6, 9.6], { speed: 2.6 }).catch(() => {}),
+  ]);
+  outside.remove(sc.g);
+  setPose(wB, POSES.idle);
+  await Promise.all([walkTo(wA, [1.0, null, 14.4], { speed: 2.8 }), walkTo(wB, [1.9, null, 14.2], { speed: 2.8 })]);
+  outside.remove(wA.root); outside.remove(wB.root);
+  await tw(700, (t) => { mat.size(1 - t, 1 - t, 1 - t); });
+  outside.remove(mat);
+  await driveTo(van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+const daemmung = (ctx) => aussenArbeit(ctx, 'daemmung');
+const fassade = (ctx) => aussenArbeit(ctx, 'fassade');
+
+export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
