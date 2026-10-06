@@ -1,7 +1,7 @@
 // Einstellungen der App. Nur die clientId muss nach der Microsoft-Einrichtung eingetragen werden
 // (siehe SETUP.md, Schritt 1). Die Client-ID ist kein Geheimnis.
 export const CONFIG = {
-  clientId: 'HIER-DIE-CLIENT-ID-EINTRAGEN',
+  clientId: '3ee25cc0-bc02-4944-8952-002d751670bf',
 
   // "common" erlaubt private Microsoft-Konten (outlook.com, hotmail.com, live.com ...) und Arbeitskonten.
   authority: 'https://login.microsoftonline.com/common',
