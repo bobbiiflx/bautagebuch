@@ -1289,7 +1289,213 @@ async function aussenArbeit(ctx, kind) {
 const daemmung = (ctx) => aussenArbeit(ctx, 'daemmung');
 const fassade = (ctx) => aussenArbeit(ctx, 'fassade');
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade };
+// ---------- Innenausbau: Estrich (A), Trockenbau (A), Maler (A) ----------
+const makeHose = (parent, n = 16, color = 0x2b2e34, r = 0.07) => {
+  const beads = [];
+  for (let i = 0; i < n; i++) { const b = sp(r, color, { outline: false }); parent.add(b); beads.push(b); }
+  // Schlauch als Kurve von a nach b mit Durchhang
+  const set = (a, b, droop = 0.5, lift = 0) => beads.forEach((s, i) => {
+    const t = i / (n - 1);
+    s.pos[0] = lerp(a[0], b[0], t); s.pos[2] = lerp(a[2], b[2], t);
+    s.pos[1] = lerp(a[1], b[1], t) - Math.sin(Math.PI * t) * droop + lift * Math.sin(Math.PI * t);
+  });
+  return { beads, set, node: parent };
+};
+const makeMixerTruck = () => {
+  const t = A.makeSkipTruck();
+  const g = grp('mischer');
+  g.add(cy(0.7, 1.0, 1.6, 0xf2a900, 10).rotate(0, 0, 1.2).at(0.3, 1.6, 0), cy(1.0, 0.5, 1.5, 0xe38f00, 10).rotate(0, 0, 1.2).at(-1.2, 1.9, 0));
+  g.add(bx(0.2, 0.1, 1.8, 0x35383e).at(-2.2, 1.0, 0));
+  t.bed.add(g);
+  t.mixer = g;
+  return t;
+};
+const PASTELS_A = [0xbfe9d3, 0xf9d9a6, 0xcfdcf6, 0xf6c6d0, 0xe5f2b0, 0xdccbf2, 0xb9e4ec, 0xf8ea9f];
+const LV = [['kg', DIM.kgY, -1.8], ['eg', DIM.egY, 0.6], ['dg', DIM.dgY, 3.2]];
+
+async function estrich(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  // 1) Fahrmischer kommt, Schlauch zum Fenster
+  engine.flyTo({ az: 0.2, el: 0.3, r: 36, target: [0, 1.5, 11] }, S(1400));
+  const truck = makeMixerTruck(); truck.at(-16, STREET_Y, 15.4); outside.add(truck);
+  const stopX = 5.6;
+  await driveTo(truck, [stopX, STREET_Y, 15.4], 3200, ease.out, false);
+  const hose = makeHose(outside, 18, 0x2b2e34, 0.09);
+  const outlet = [stopX - 3.4, STREET_Y + 1.0, 15.4], win = [2.0, 1.9, 7.5];
+  const w1 = mk(LOOKS.bau, stopX - 3.6, STREET_Y, 13.8, outside), w2 = mk(LOOKS.bauin, 2.6, 0, 9.4, outside);
+  faceDir(w2.root, 0, -1);
+  await tw(1400, (t) => { const m = [lerp(outlet[0], win[0], t), lerp(outlet[1], win[1], t), lerp(outlet[2], win[2], t)]; hose.set(outlet, m, 0.4 * (1 - t)); hose.beads.forEach((b, i) => { b.visible = i / 17 <= t; }); });
+  hose.set(outlet, win, 0.8);
+  // Beton pulsiert durch den Schlauch (graue Kugeln wandern)
+  const slugs = []; for (let i = 0; i < 5; i++) { const s = sp(0.13, 0xb9bcc0, { outline: false }); outside.add(s); slugs.push(s); }
+  let flow = true;
+  (async () => { let t0 = 0; while (flow) { await wait(40); t0 += 0.03; slugs.forEach((s, i) => { const t = (t0 + i / 5) % 1; s.pos[0] = lerp(outlet[0], win[0], t); s.pos[2] = lerp(outlet[2], win[2], t); s.pos[1] = lerp(outlet[1], win[1], t) - Math.sin(Math.PI * t) * 0.8; }); truck.mixer.rot[0] = Math.sin(t0 * 6) * 0.02; } })();
+  await wait(600);
+  outside.visible = false;
+  // 2) Je Geschoss: Estrich fließt vom Schlauchende nach außen
+  const lvlP = { kg: 0, eg: 0, dg: 0 };
+  const fixView = () => itn.screed.forEach((x) => {
+    const p = lvlP[x.lvl]; x.visible = p > 0.02 && (x.lvl === curLvl || order.indexOf(x.lvl) < order.indexOf(curLvl)); const k = Math.max(p, 0.001);
+    x.scale[0] = k; x.scale[2] = k; x.scale[1] = 1; x.pos[1] = x.baseY + 0.07;
+  });
+  const order = ['kg', 'eg', 'dg']; let curLvl = 'kg';
+  house.setProgress({ ...house.state.p, estrich: 0.01 });
+  const origC = new Map(itn.screed.map((x) => [x, [...x.color]])), wetC = hex(0x7d858e);
+  itn.screed.forEach((x) => { x.color = wetC; });
+  const dry = (x, t) => { x.color = origC.get(x).map((v, i) => lerp(wetC[i], v, t)); };
+  const h1 = mk(LOOKS.bau, 0, 0, 0), h2 = mk(LOOKS.bauin, 0, 0, 0);
+  const ihose = makeHose(fx, 14, 0x2b2e34, 0.09);
+  for (const [lvl, y0, ty] of LV) {
+    curLvl = lvl; house.setView('innen', lvl); fixView();
+    engine.flyTo({ az: 0.5, el: 1.0, r: 21, target: [0, ty, 2.5] }, S(1200));
+    const sx = 1.5, sz = 2.0; // Schlauchende / Mitte
+    h1.root.pos = [win[0] - 0.6, y0, 6.0]; h2.root.pos = [-1.5, y0, 1.5];
+    faceDir(h1.root, 0, -1);
+    const hnd = [sx, y0 + 1.0, sz];
+    const winI = [win[0], y0 + 1.3, 6.9];
+    await tw(5200, (t) => {
+      const k = ease.out(t); lvlP[lvl] = k; fixView();
+      const R = 1 + 5.5 * k;
+      h1.root.pos[0] = sx + 0.9; h1.root.pos[2] = sz + 0.9; h1.root.pos[1] = y0 + 0.14 * k;
+      faceDir(h1.root, -0.3, -1); setPose(h1, { ...POSES.push, lean: 0.2 });
+      ihose.set(winI, [h1.root.pos[0] - 0.2, y0 + 1.0, h1.root.pos[2] - 0.1], 0.4);
+      // Zweiter Mann zieht mit der Latte am Rand hin und her
+      const a = t * 18;
+      h2.root.pos[0] = 0.2 + Math.sin(a) * R * 0.85; h2.root.pos[2] = 0.3 + Math.cos(a * 0.7) * 0.7 * R * 0.5 + 0.8; h2.root.pos[1] = y0 + 0.14 * k;
+      faceDir(h2.root, Math.cos(a), 0.3);
+      setPose(h2, { ...POSES.push, rArm: 1.2 + Math.sin(a * 3) * 0.3, lean: 0.3 });
+      if (Math.random() < 0.25) burst([h2.root.pos[0], y0 + 0.25, h2.root.pos[2]], 2, 0xcfd2d6, 1.2, 300);
+    });
+    lvlP[lvl] = 1; fixView();
+    setPose(h1, POSES.thumbs); setPose(h2, POSES.wave(0));
+    burst([0.2, y0 + 1.0, 1.0], 14, 0xcfd2d6, 3, 600);
+    const sl = itn.screed.find((x) => x.lvl === lvl);
+    await tw(1100, (t) => dry(sl, ease.out(t)));
+  }
+  flow = false; outside.remove(hose.node); // Schlauch raus
+  itn.screed.forEach((x) => { x.color = origC.get(x); });
+  h1.root.visible = false; h2.root.visible = false; ihose.beads.forEach((b) => { b.visible = false; });
+  // 3) Zurück nach außen, Fahrmischer fährt ab
+  house.setView('aussen');
+  outside.visible = true; slugs.forEach((s) => { s.visible = false; }); hose.beads.forEach((b) => { b.visible = false; });
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  await walkTo(w2, [stopX - 3.0, null, 14.0], { speed: 2.6 });
+  puff([stopX - 3.4, STREET_Y + 0.4, 15.4], 4, 0.6);
+  outside.remove(w1.root); outside.remove(w2.root);
+  await driveTo(truck, [40, STREET_Y, 15.4], 2800, ease.in, false);
+}
+
+async function trockenbau(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff, toss } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  const crew = await crewArrive(ctx, T, outside, { van: [0xf4f1ea, 0x8a8f98], looks: [LOOKS.bau, LOOKS.profi], carry: () => bx(1.2, 0.04, 0.8, 0xf4f1ea) });
+  await crew.enter();
+  outside.visible = false;
+  const prog = {}; // idx -> 0..1 Wandhöhe
+  const order = ['kg', 'eg', 'dg']; let curLvl = 'kg';
+  const ghosts = new Map();
+  const fixView = () => itn.newParts.forEach((n) => {
+    const p = prog[n.idx] ?? 0, hp = Math.min(n.H, 99);
+    n.visible = p > 0.01;
+    n.scale[1] = Math.max(n.H * p, 0.001); n.pos[1] = n.base + n.scale[1] / 2;
+    const g = ghosts.get(n.idx); if (g) g.visible = (n.lvl === curLvl);
+  });
+  house.setProgress({ ...house.state.p, trockenbau: 0.01 });
+  const T1 = mk(LOOKS.bau, 0, 0, 0), T2 = mk(LOOKS.profi, 0, 0, 0);
+  const pallet = bx(1.3, 0.5, 0.9, 0xf4f1ea); fx.add(pallet);
+  for (const [lvl, y0, ty] of LV) {
+    curLvl = lvl; house.setView('innen', lvl);
+    // Ghost-Rahmen (Metallständer) für alle Wände des Geschosses
+    const parts = itn.newParts.filter((n) => n.lvl === lvl);
+    parts.forEach((n) => {
+      if (!ghosts.has(n.idx)) { const g = new Node(n.geo, { color: hex(0x9aa1a8), alpha: 0.35, outline: false }); g.pos = [...n.pos]; g.rot = [...n.rot]; g.scale = [1.02, 1, 1.02]; g.pos[1] = n.base + n.H / 2; g.scale[1] = n.H; n.parent?.add(g); ghosts.set(n.idx, g); g.visible = false; }
+      else ghosts.get(n.idx).visible = true;
+    });
+    fixView();
+    engine.flyTo({ az: 0.55, el: 1.0, r: 21, target: [-0.5, ty, 2.5] }, S(1200));
+    pallet.pos = [stackX0(), y0 + 0.25, 6.4]; pallet.visible = true;
+    T1.root.pos = [stackX0() - 1.2, y0, 6.2]; T2.root.pos = [stackX0() + 1.2, y0, 6.2];
+    for (let i = 0; i < parts.length; i++) {
+      const n = parts[i];
+      const tgt = [n.pos[0], y0 + 1.2, n.pos[2]];
+      const b = bx(1.2, 0.8, 0.05, 0xf4f1ea, { outline: false }); fx.add(b); b.at(pallet.pos[0], y0 + 0.9, pallet.pos[2]);
+      walkTo(T1, [lerp(T1.root.pos[0], tgt[0], 0.5), y0, lerp(T1.root.pos[2], tgt[2], 0.5)], { speed: 3 });
+      await toss(b, [pallet.pos[0], y0 + 0.9, pallet.pos[2]], tgt, 1.2, 420);
+      fx.remove(b);
+      setPose(T2, { ...POSES.push, rArm: 1.0 + (i % 2) * 0.4 });
+      await tw(380, (t) => { prog[n.idx] = ease.out(t); fixView(); });
+      prog[n.idx] = 1; fixView();
+      burst([tgt[0], y0 + 1.5, tgt[2]], 3, 0xf4f1ea, 1.6, 300);
+    }
+    parts.forEach((n) => { const g = ghosts.get(n.idx); if (g) g.visible = false; });
+    pallet.visible = false;
+    setPose(T1, POSES.thumbs); setPose(T2, POSES.wave(0));
+    await wait(300);
+  }
+  ghosts.forEach((g) => { g.visible = false; });
+  T1.root.visible = false; T2.root.visible = false;
+  house.setView('aussen'); outside.visible = true; crew.van.visible = true;
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  await wait(400);
+  await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+const stackX0 = () => 1.4;
+
+async function maler(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  const crew = await crewArrive(ctx, T, outside, { van: [0xf4f1ea, 0xe0553f], looks: [LOOKS.profi, LOOKS.bauin], carry: () => { const g = grp('eimer'); g.add(cy(0.17, 0.14, 0.3, 0xf6f6f2, 8).at(0, 0, 0), bx(0.3, 0.04, 0.04, 0x9aa1a8).at(0, 0.2, 0)); return g; } });
+  await crew.enter();
+  outside.visible = false;
+  house.setProgress({ ...house.state.p, trockenbau: 100, maler: 0 });
+  const M1 = mk(LOOKS.profi, 0, 0, 0), M2 = mk(LOOKS.bauin, 0, 0, 0);
+  const roller = grp('rolle'); roller.add(bx(0.05, 0.8, 0.05, 0x8a5a36).at(0, 0.25, 0), cy(0.1, 0.1, 0.45, 0xffffff, 8).rotate(0, 0, Math.PI / 2).at(0, 0.7, 0));
+  M1.hold.add(roller);
+  const bucket = grp('eimer'); bucket.add(cy(0.18, 0.15, 0.32, 0xf6f6f2, 8).at(0, 0.16, 0)); fx.add(bucket);
+  const total = itn.newParts.length;
+  let done = 0;
+  for (const [lvl, y0, ty] of LV) {
+    house.setView('innen', lvl);
+    engine.flyTo({ az: 0.55, el: 1.0, r: 21, target: [-0.5, ty, 2.5] }, S(1200));
+    const parts = itn.newParts.filter((n) => n.lvl === lvl).sort((a, b) => a.idx - b.idx);
+    M1.root.pos = [stackX0() + 1.0, y0, 6.2]; M2.root.pos = [stackX0() - 1.2, y0, 6.2];
+    for (let i = 0; i < parts.length; i++) {
+      const n = parts[i], col = PASTELS_A[n.idx % PASTELS_A.length];
+      const px = n.pos[0], pz = n.pos[2];
+      bucket.at(px + 0.9, y0, pz + 0.9);
+      roller.children[1].color = hex(col);
+      await walkTo(M1, [px + 0.8, y0, pz + 0.9], { speed: 4 });
+      faceDir(M1.root, -1, -0.4);
+      walkTo(M2, [px - 0.8, y0, pz - 1.0], { speed: 4 });
+      await tw(380, (t) => { setPose(M1, { ...POSES.push, rArm: 1.0 + Math.sin(t * 14) * 0.6, lean: 0.3 }); });
+      done++;
+      house.setProgress({ ...house.state.p, trockenbau: 100, maler: done / total * 100 });
+      burst([px, y0 + 1.4, pz], 4, col, 1.8, 400);
+    }
+    setPose(M1, POSES.thumbs);
+    await wait(250);
+  }
+  M1.root.visible = false; M2.root.visible = false; bucket.visible = false;
+  house.setView('aussen'); outside.visible = true; crew.van.visible = true;
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  await wait(400);
+  await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+
+export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
