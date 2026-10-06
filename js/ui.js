@@ -4,6 +4,7 @@ import * as Auth from './auth.js';
 import * as Session from './session.js';
 import { Remote } from './onedrive.js';
 import { CONFIG } from './config.js';
+import { hausView } from './haus-view.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS } from './phases.js';
 
 // ---------- Hilfsfunktionen ----------
@@ -50,6 +51,22 @@ export function toast(msg, ms = 3500) {
 
 // ---------- Dialoge ----------
 let renderAfterClose = false;
+
+export function askConfirm(text, okLabel = 'Ja') {
+  return new Promise((resolve) => {
+    let result = false;
+    const dlg = h('dialog', { class: 'sheet more' },
+      h('div', { class: 'sheet-body' },
+        h('p', {}, text),
+        h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'btn', onclick: () => dlg.close() }, 'Abbrechen'),
+          h('button', { type: 'button', class: 'btn primary', onclick: () => { result = true; dlg.close(); } }, okLabel))));
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(result); });
+    document.body.append(dlg);
+    dlg.showModal();
+  });
+}
+
 export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, onCancel, noSave } = {}) {
   const dlg = h('dialog', { class: 'sheet' });
   const form = h(
@@ -86,7 +103,7 @@ export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, 
           type: 'button',
           class: 'btn danger block',
           onclick: async () => {
-            if (confirm('Wirklich löschen?')) { await onDelete(); dlg.close(); }
+            if (await askConfirm('Wirklich löschen?', 'Löschen')) { await onDelete(); dlg.close(); }
           },
         }, 'Löschen')
     )
@@ -225,7 +242,8 @@ function viewHome() {
     ),
     card(
       '3D-Haus',
-      h('p', { class: 'muted' }, 'Hier erscheint im nächsten Schritt euer Haus als Low-Poly-Modell. Es zeigt genau die Phasen, die ihr als fertig markiert habt – egal in welcher Reihenfolge.'),
+      h('p', { class: 'muted' }, 'Euer Haus als Low-Poly-Modell. Es zeigt genau die Phasen, die ihr als fertig markiert habt – egal in welcher Reihenfolge.'),
+      h('a', { class: 'btn primary', href: '#/haus', onclick: (e) => { e.preventDefault(); go('haus'); } }, 'Haus ansehen'),
       h('div', { class: 'chips' }, ph.map((p) => chip(`${p.icon || '🔧'} ${p.name.split(' ')[0].replace(',', '')}`, p.state === 'fertig' ? 'done' : p.state === 'laeuft' ? 'run' : 'dim')))
     ),
     h(
@@ -490,6 +508,7 @@ function phaseForm(entry) {
   const start = h('input', { type: 'date', value: e.start || '' });
   const end = h('input', { type: 'date', value: e.end || '' });
   const note = h('textarea', { rows: 3, placeholder: 'Firma, Besonderheiten, Termine …', value: e.note || '' });
+  const animAt = h('input', { type: 'number', min: 1, max: 100, step: 1, inputmode: 'numeric', value: e.animAt || 10 });
   range.addEventListener('input', () => {
     const p = Number(range.value);
     out.textContent = p + ' %';
@@ -501,8 +520,8 @@ function phaseForm(entry) {
     else if (Number(range.value) === 0 || Number(range.value) === 100) range.value = 50;
     out.textContent = range.value + ' %';
   });
-  sheet(entry ? e.name : 'Eigene Phase', [field('Name', name), field('Status', state), h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Fortschritt ', out), range), field('Geplanter Beginn', start), field('Geplantes Ende', end), field('Notiz', note)], {
-    onSave: () => Store.save('phases', { ...e, name: name.value.trim(), state: state.value, progress: Number(range.value), start: start.value, end: end.value, note: note.value.trim() }),
+  sheet(entry ? e.name : 'Eigene Phase', [field('Name', name), field('Status', state), h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Fortschritt ', out), range), field('Geplanter Beginn', start), field('Geplantes Ende', end), field('3D-Animation startet bei (%)', animAt), field('Notiz', note)], {
+    onSave: () => Store.save('phases', { ...e, name: name.value.trim(), state: state.value, progress: Number(range.value), start: start.value, end: end.value, animAt: Math.min(100, Math.max(1, Number(animAt.value) || 10)), note: note.value.trim() }),
     onDelete: entry && !isDefaultPhase(e.id) ? () => Store.remove('phases', e.id) : null,
   });
 }
@@ -677,7 +696,7 @@ function viewSettings() {
 
 async function switchTarget(t) {
   if (Store.pendingCount() > 0 && JSON.stringify(Session.getTarget()) !== JSON.stringify(t)) {
-    if (!confirm('Auf diesem Gerät gibt es noch nicht synchronisierte Einträge. Beim Wechsel des Ordners gehen sie verloren. Trotzdem wechseln?')) return;
+    if (!(await askConfirm('Auf diesem Gerät gibt es noch nicht synchronisierte Einträge. Beim Wechsel des Ordners gehen sie verloren. Trotzdem wechseln?', 'Wechseln'))) return;
   }
   await Session.setTarget(t);
   render();
@@ -704,20 +723,31 @@ const ROUTES = {
   planung: ['Planung', viewPlan],
   dokumente: ['Dokumente', viewDocs],
   einstellungen: ['Einstellungen', viewSettings],
+  haus: ['3D-Haus', () => hausView(phases())],
 };
-const NAV = [['', '🏠', 'Übersicht'], ['tagebuch', '📓', 'Tagebuch'], ['kosten', '💶', 'Kosten'], ['maengel', '⚠️', 'Mängel']];
+const NAV = [['', '🏠', 'Übersicht'], ['haus', '🏡', 'Haus'], ['tagebuch', '📓', 'Tagebuch'], ['kosten', '💶', 'Kosten'], ['maengel', '⚠️', 'Mängel']];
 const MORE = [['aufgaben', '✅', 'Aufgaben'], ['planung', '📅', 'Planung'], ['dokumente', '📁', 'Dokumente'], ['einstellungen', '⚙️', 'Einstellungen']];
 
-const route = () => {
+const readHash = () => {
   const r = location.hash.replace(/^#\/?/, '');
   return r in ROUTES ? r : '';
 };
+let current = null;
+const route = () => (current === null ? (current = readHash()) : current);
+
+export function go(r) {
+  current = r in ROUTES ? r : '';
+  try { history.pushState(null, '', '#/' + current); } catch { /* z. B. eingebettete Vorschau */ }
+  window.scrollTo(0, 0);
+  render();
+}
+const navClick = (k, after) => (e) => { e.preventDefault(); after?.(); go(k); };
 
 let root, headerSync, mainEl, navEl;
 
 function openMore() {
   const dlg = h('dialog', { class: 'sheet more' },
-    h('div', { class: 'sheet-body' }, MORE.map(([r, ic, t]) => h('a', { class: 'more-item', href: '#/' + r, onclick: () => dlg.close() }, h('span', {}, ic), t)), h('button', { class: 'btn block', onclick: () => dlg.close() }, 'Schließen')));
+    h('div', { class: 'sheet-body' }, MORE.map(([r, ic, t]) => h('a', { class: 'more-item', href: '#/' + r, onclick: navClick(r, () => dlg.close()) }, h('span', {}, ic), t)), h('button', { class: 'btn block', onclick: () => dlg.close() }, 'Schließen')));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
@@ -737,7 +767,7 @@ export function render() {
   headerSync.replaceChildren(syncBadge());
   mainEl.replaceChildren(view());
   navEl.replaceChildren(
-    ...NAV.map(([k, ic, t]) => h('a', { href: '#/' + k, class: r === k ? 'on' : '' }, h('span', { class: 'ic' }, ic), t)),
+    ...NAV.map(([k, ic, t]) => h('a', { href: '#/' + k, class: r === k ? 'on' : '', onclick: navClick(k) }, h('span', { class: 'ic' }, ic), t)),
     h('button', { class: MORE.some((m) => m[0] === r) ? 'on' : '', onclick: openMore }, h('span', { class: 'ic' }, '☰'), 'Mehr')
   );
   window.scrollTo(0, y);
@@ -745,11 +775,13 @@ export function render() {
 
 export function mount(el) {
   root = el;
-  headerSync = h('button', { class: 'sync-btn', 'aria-label': 'Synchronisierung', onclick: () => { location.hash = '#/einstellungen'; } });
+  headerSync = h('button', { class: 'sync-btn', 'aria-label': 'Synchronisierung', onclick: () => go('einstellungen') });
   mainEl = h('main', {});
   navEl = h('nav', { class: 'tabbar' });
   root.append(h('header', { class: 'topbar' }, h('h1', { class: 'title' }, 'Bautagebuch'), headerSync), mainEl, navEl);
-  addEventListener('hashchange', () => { window.scrollTo(0, 0); render(); });
+  const onNav = () => { const r = readHash(); if (r !== current) { current = r; window.scrollTo(0, 0); render(); } };
+  addEventListener('hashchange', onNav);
+  addEventListener('popstate', onNav);
   // Zurückgestellte Aktualisierung nachholen, sobald ein Dialog schließt oder das Eingabefeld verlassen wird.
   const flush = () => setTimeout(() => { if (renderAfterClose && !document.querySelector('dialog[open]')) { renderAfterClose = false; render(); } }, 0);
   document.addEventListener('close', flush, true);

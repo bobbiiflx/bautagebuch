@@ -24,7 +24,8 @@ Ihr braucht dafür:
 
 Das ist nötig, damit sich die App überhaupt bei OneDrive anmelden darf. Es kostet nichts und braucht kein Azure-Abo.
 
-1. **entra.microsoft.com** öffnen (alternativ portal.azure.com) und mit dem Microsoft-Konto anmelden, dessen OneDrive genutzt werden soll. Bei einem rein privaten Konto bittet Microsoft ggf. einmalig um eine kurze Kontoeinrichtung. Ein Abo oder Zahlungsmittel brauchst du nicht.
+1. **entra.microsoft.com** öffnen (alternativ portal.azure.com) und mit dem Microsoft-Konto anmelden, dessen OneDrive genutzt werden soll.
+   - **Wichtig bei privaten Konten (outlook.com, hotmail.com, live.com):** Ein privates Konto hat zunächst kein eigenes Verzeichnis. Dann scheitert die Anmeldung im Portal mit der Meldung *„User account … from identity provider 'live.com' does not exist in tenant 'Microsoft Services'“* (AADSTS16000). Lösung: einmalig ein kostenloses Azure-Konto anlegen (**azure.microsoft.com/free**, mit demselben Microsoft-Konto). Dabei entsteht ein eigenes Verzeichnis, in dem du die App registrieren kannst. Microsoft verlangt dafür Telefonnummer und Zahlungskarte zur Identitätsprüfung; es wird nichts abgebucht, solange du das Konto nicht auf „Pay-as-you-go“ umstellst. Danach im Portal ab- und neu anmelden und oben rechts über **Verzeichnisse wechseln** das neue Standardverzeichnis wählen.
 2. **App-Registrierungen** (Identität, Anwendungen) und dort **Neue Registrierung**.
 3. Ausfüllen:
    - **Name:** Bautagebuch
@@ -73,6 +74,7 @@ Ab jetzt sehen beide dieselben Einträge. Änderungen kommen innerhalb etwa eine
 
 | Meldung / Problem | Ursache und Lösung |
 |---|---|
+| Portal-Anmeldung scheitert mit „does not exist in tenant 'Microsoft Services'“ (AADSTS16000) | Dein privates Konto hat noch kein Verzeichnis. Siehe Teil 2, Schritt 1: kostenloses Azure-Konto anlegen, dann im Portal neu anmelden. |
 | „redirect_uri … does not match“ (AADSTS50011) | Die Umleitungs-URI bei Microsoft weicht von der App-Adresse ab. Sie muss exakt gleich sein, inkl. `https://`, Groß-/Kleinschreibung und Schrägstrich am Ende, und als Plattform **Single-Page-Anwendung** eingetragen sein. |
 | „Application … not found“ (AADSTS700016) | Client-ID in js/config.js falsch kopiert, oder die Änderung ist noch nicht online (ein bis zwei Minuten warten, Seite neu laden). |
 | Anmeldung funktioniert nur mit meinem Konto, nicht mit dem meiner Freundin | Beim Anlegen der Registrierung wurde ein Kontotyp ohne „persönliche Microsoft-Konten“ gewählt. In der Registrierung unter *Authentifizierung* die Kontotypen anpassen. |
