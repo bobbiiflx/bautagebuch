@@ -7,7 +7,7 @@ import { makeBin } from './actors.js';
 export const DIM = {
   hw: 7.44, hd: 7.2, t: 0.38,
   kgY: -2.6, egY: 0.6, dgY: 3.3,
-  hEG: 2.7, hDG0: 1.0, hDG1: 2.6,
+  hEG: 2.7, hDG0: 0.8, hDG1: 0.8, knee: 0.8, pitch: Math.PI / 6,
   rise: 1.85, ov: 0.55,
   garW: 5.03, garD: 5.3, garH: 2.9,
 };
@@ -61,7 +61,11 @@ export function buildHouse(engine) {
   const { t } = DIM;
   const root = engine.root;
   const parts = {};
-  const dgH = (s) => lerp(DIM.hDG0, DIM.hDG1, s);
+  // Satteldach über das ganze Haus: Kniestock 0,80 m, Firstrichtung West-Ost, Neigung 30°
+  const TAN = Math.tan(DIM.pitch), RISE = 7.2 * TAN, TOPMAX = DIM.knee + RISE;
+  const dgH = (s) => lerp(DIM.hDG0, TOPMAX + 0.02, s);   // aktuelle Mauerwerkshöhe im Dachgeschoss
+  const topAt = (x, z) => DIM.knee + (7.2 - Math.min(Math.abs(z), 7.2)) * TAN;   // Unterkante des Daches über dem DG-Boden
+  const DZF = 7.4;   // Vorderkante der Gauben
 
   // ---------- Diorama-Insel: Schichten wie im Querschnitt ----------
   const terrain = grp('terrain');
@@ -166,10 +170,58 @@ export function buildHouse(engine) {
   };
   const kgH = DIM.egY - DIM.kgY;
   for (const e of geo.kg.edges) { const n = wallBox(e, kgH, C.sockel, 'kg'); n.pos[1] = DIM.kgY + kgH / 2; floors.kg.shell.add(n); }
-  const egWalls = [], dgWalls = [];
+  const egWalls = [];
   for (const e of geo.egW.edges) { const n = wallBox(e, DIM.hEG, C.oldWall, 'eg'); n.pos[1] = DIM.egY + DIM.hEG / 2; floors.eg.shell.add(n); egWalls.push(n); }
-  for (const e of geo.dg.edges) { const n = wallBox(e, DIM.hDG1, C.oldWall, 'dg'); n.pos[1] = DIM.dgY + 0.5; floors.dg.shell.add(n); dgWalls.push({ node: n, e }); }
-  parts.dgWalls = dgWalls;
+  // Bestand: niedrige, durchgehende Wand
+  const dgOld = geo.dg.edges.map((e) => { const n = wallBox(e, DIM.hDG0, C.oldWall, 'dg'); n.pos[1] = DIM.dgY + DIM.hDG0 / 2; floors.dg.shell.add(n); return { node: n, e }; });
+  // Neu: Wandpolygon mit Loggia-Einschnitt; die Wände wachsen bis unter das Dach (Giebel, Rückwand des Flügels, Wand zum ausgeschnittenen Teil)
+  const LOG = { u0: 5.64, u1: 9.24, d: 2.27 };
+  geo.dgW = edgesOf([[0, 0], [LOG.u0, 0], [LOG.u0, LOG.d], [LOG.u1, LOG.d], [LOG.u1, 0], ...FOOT.dg.slice(1)]);
+  const simplify = (poly) => poly.filter((p, i, a) => {
+    const q = a[(i + a.length - 1) % a.length], r = a[(i + 1) % a.length];
+    return Math.abs((p[0] - q[0]) * (r[1] - p[1]) - (p[1] - q[1]) * (r[0] - p[0])) > 1e-6;
+  });
+  const wallPoly = (e, ext, Lvl) => {
+    const len = e.len, a = -ext, b = len + ext;
+    const topE = (tau) => { const c = Math.max(0, Math.min(len, tau)); return topAt(e.p[0] + e.d[0] * c, e.p[1] + e.d[1] * c); };
+    const bps = new Set([a, 0, len, b]);
+    if (Math.abs(e.d[1]) > 1e-6) { const t0 = -e.p[1] / e.d[1]; if (t0 > 0 && t0 < len) bps.add(t0); }
+    const ts = [...bps].sort((x, y) => x - y), pts = [];
+    for (let i = 0; i < ts.length; i++) {
+      const ta = ts[i];
+      pts.push([ta, Math.min(topE(ta), Lvl)]);
+      if (i < ts.length - 1) {
+        const tb = ts[i + 1], ha = topE(ta) - Lvl, hb = topE(tb) - Lvl;
+        if (ha * hb < 0) pts.push([ta + (tb - ta) * ha / (ha - hb), Lvl]);
+      }
+    }
+    const poly = [[a - len / 2, 0], [b - len / 2, 0]];
+    for (let i = pts.length - 1; i >= 0; i--) poly.push([pts[i][0] - len / 2, pts[i][1]]);
+    return simplify(poly);
+  };
+  const wallGeoCache = new Map();
+  const wallGeo = (key, e, th, ext, Lvl) => {
+    const L = Math.round(Lvl * 20) / 20, k = key + '|' + th + '|' + L;
+    let g = wallGeoCache.get(k);
+    if (!g) { g = G.extrude(wallPoly(e, ext, L), th, (u, v, w) => [u, v, w]); wallGeoCache.set(k, g); }
+    return g;
+  };
+  const dgNew = geo.dgW.edges.map((e, i) => {
+    const n = new Node(wallGeo('w' + i, e, t, t / 2, TOPMAX), { color: hex(C.rawBrick), shadow: true });
+    n.rot[1] = Math.atan2(-e.d[1], e.d[0]);
+    n.pos[0] = (e.p[0] + e.q[0]) / 2 - e.out[0] * t / 2; n.pos[2] = (e.p[1] + e.q[1]) / 2 - e.out[1] * t / 2; n.pos[1] = DIM.dgY;
+    n.visible = false; floors.dg.shell.add(n);
+    return { node: n, e, i };
+  });
+  const ovNew = [];
+  const mkOverlayNew = (color, off, th, key) => geo.dgW.edges.forEach((e, i) => {
+    const n = new Node(null, { color: hex(color), shadow: true });
+    n.rot[1] = Math.atan2(-e.d[1], e.d[0]);
+    n.pos[0] = (e.p[0] + e.q[0]) / 2 + e.out[0] * (off + th / 2); n.pos[2] = (e.p[1] + e.q[1]) / 2 + e.out[1] * (off + th / 2); n.pos[1] = DIM.dgY;
+    n.visible = false; floors.dg.shell.add(n); ovNew.push({ node: n, e, i, key, th });
+  });
+  mkOverlayNew(C.insul, 0.0, 0.1, 'daemmung'); mkOverlayNew(C.plaster, 0.1, 0.06, 'fassade');
+  parts.dgWalls = dgNew; parts.dgOld = dgOld;
   // Sockelband (hellgrau) rund ums EG, damit das Sockelgeschoss klar erkennbar bleibt
   const slab = (lvl, y, c) => {
     const n = new Node(slabGeo(FOOT[lvl], 0.3), { color: hex(c) });
@@ -233,16 +285,19 @@ export function buildHouse(engine) {
   mkWindow('eg', 1, 3.0, 1.2, 1.4, ey);
   mkWindow('eg', 1, 12.4, 1.2, 1.4, ey);
   const dy = DIM.dgY + 0.5;
-  mkWindow('dg', 0, 2.0, 1.6, 2.0, DIM.dgY, 'door');
-  mkWindow('dg', 0, 6.2, 1.4, 1.4, dy);
-  mkWindow('dg', 0, 11.0, 1.5, 1.4, dy);
-  mkWindow('dg', 5, 2.4, 1.2, 2.1, DIM.dgY, 'door');   // Tür zum Außentreppen-Podest
-  mkWindow('dg', 4, 3.0, 1.5, 1.6, DIM.dgY + 0.4);
-  mkWindow('dg', 4, 6.4, 1.6, 2.0, DIM.dgY, 'door');   // Balkon
+  // Gauben (links und rechts, nah am Rand): Fenster in der Gaubenfront
+  const dormerU = [2.04, 12.84];
+  for (const u of dormerU) {
+    const rec = mkWindow('dg', { p: [X(u) + 1.2, DZF - 0.1], d: [-1, 0], out: [0, 1], len: 2.4 }, 1.2, 1.5, 1.4, DIM.dgY + 0.95);
+    rec.dormer = true; rec.wall = 'front';
+  }
+  mkWindow('dg', geo.dgW.edges[2], 1.8, 2.4, 2.1, DIM.dgY, 'door');   // Loggia-Tür
   mkWindow('dg', 1, 3.0, 1.2, 1.4, dy);
   mkWindow('dg', 1, 9.5, 1.2, 1.4, dy);
-  mkWindow('dg', 2, 1.6, 1.3, 1.4, dy);
-  mkWindow('dg', 2, 4.9, 1.3, 1.4, dy);
+  mkWindow('dg', 4, 3.0, 1.5, 1.6, DIM.dgY + 0.4);
+  mkWindow('dg', 4, 6.4, 1.6, 2.0, DIM.dgY, 'door');   // Balkon
+  mkWindow('dg', 5, 2.4, 1.2, 2.1, DIM.dgY, 'door');   // Tür zum Außentreppen-Podest
+  mkWindow('dg', 5, 5.8, 1.2, 1.4, dy);
   windows.forEach((w, i) => { w.idx = i; });
   parts.windows = windows;
 
@@ -276,81 +331,97 @@ export function buildHouse(engine) {
   root.add(garage);
   parts.garage = garage;
 
-  // ---------- Dach: zwei Satteldächer (West-Flügel E-W, Stem N-S) ----------
-  const roof = grp('dach');
+  // ---------- Altes Dach: Walmdach über dem Bestand ----------
   const rs = DIM.rise, ov = DIM.ov;
-  const roofParts = [];
-  // Hilfsfunktion: Prisma mit Firstrichtung entlang local-x, Länge len, Halbbreite hw
-  const mkRoof = (name, hwid, len, cx, cz, rotY, hipM = true, hipP = true) => {
+  const oldRoof = grp('altesDach'), oldParts = [];
+  const mkOld = (hwid, len, cx, cz, rotY, hipM, hipP) => {
     const ang = Math.atan2(rs, hwid), zo = hwid + ov, yE = -ov * Math.tan(ang);
-    const g = grp(name); g.at(cx, 0, cz).rotate(0, rotY, 0);
-    const poly = [[-zo, yE], [0, rs], [zo, yE]];
-    const mkPr = (c, o = {}) => new Node(G.extrude(poly, len, (u, v, w) => [w, v, u]), { color: hex(c), shadow: true, ...o });
-    const deck = mkPr(C.deck);
-    // Altes Dach: Walmdach (Walm an freien Enden, kein Walm dort, wo der andere Flügel anschließt)
-    const hip = (hm, hp) => {
-      const L2 = len / 2, rm = hm ? -L2 + zo : -L2, rp = hp ? L2 - zo : L2;
-      const E = (x, z) => [x, yE, z], R = (x) => [x, rs, 0];
-      const A = E(-L2, zo), B = E(L2, zo), Cc = E(L2, -zo), D = E(-L2, -zo), Rm = R(rm), Rp = R(rp);
-      return G.tris([[A, B, Rp], [A, Rp, Rm], [D, Cc, Rp], [D, Rp, Rm], [B, Cc, Rp], [A, D, Rm], [A, B, Cc], [A, Cc, D]]);
-    };
-    const old = new Node(hip(hipM, hipP), { color: hex(C.roofOld), shadow: true });
-    const raf = grp('sparren');
-    const nR = Math.round(len / 1.3);
-    const slopeLen = Math.hypot(zo, rs - yE), rowLen = slopeLen / 12;
-    for (let i = 0; i <= nR; i++) {
-      const x = -len / 2 + 0.1 + i * (len - 0.2) / nR;
-      for (const sg of [-1, 1]) raf.add(box(0.14, 0.2, slopeLen, 0xe2b873).at(x, (yE + rs) / 2 + 0.1, sg * zo / 2).rotate(sg * ang, 0, 0));
-    }
-    raf.add(box(len, 0.22, 0.22, 0xe2b873).at(0, rs + 0.05, 0));
-    const rows = { front: [], back: [] };
-    for (const [side, sg] of [['front', 1], ['back', -1]]) {
-      for (let i = 0; i < 12; i++) {
-        const s = (i + 0.5) * rowLen;
-        const z = sg * (zo - s * Math.cos(ang)), y = yE + s * Math.sin(ang) + 0.07;
-        const r = box(len + 0.05, 0.12, rowLen * 0.99, i % 2 ? C.roofNew : C.roofNew2).at(0, y, z).rotate(sg * ang, 0, 0);
-        g.add(r); rows[side].push(r);
-      }
-    }
-    // Giebelflächen
-    const capPoly = [[-hwid, 0], [0, rs], [hwid, 0]];
-    const caps = [];
-    for (const sx of [-1, 1]) {
-      const c = new Node(G.extrude(capPoly, 0.06, (u, v, w) => [sx * (len / 2 + 0.03) + w * 0, v + 0.0, u]), { color: hex(C.gable) });
-      c.pos[0] = 0; caps.push(c); g.add(c);
-    }
-    const trim = grp('blende');
-    for (const sg of [-1, 1]) {
-      trim.add(box(len + 0.1, 0.2, 0.14, 0xa5703f).at(0, yE - 0.02, sg * zo).rotate(sg * ang, 0, 0));
-      for (const sx of [-1, 1]) trim.add(box(0.14, 0.18, slopeLen + 0.1, 0xa5703f).at(sx * (len / 2 + 0.02), (yE + rs) / 2, sg * zo / 2).rotate(sg * ang, 0, 0));
-    }
-    g.add(old, deck, raf, trim);
-    roof.add(g);
-    const info = { g, old, deck, raf, trim, rows, ang, zo, yE, hwid, len, slopeLen, rowLen, caps, cx, cz, rotY };
-    roofParts.push(info);
-    return info;
+    const L2 = len / 2, rm = hipM ? -L2 + zo : -L2, rp = hipP ? L2 - zo : L2;
+    const E = (x, z) => [x, yE, z], A = E(-L2, zo), B = E(L2, zo), Cc = E(L2, -zo), D = E(-L2, -zo), Rm = [rm, rs, 0], Rp = [rp, rs, 0];
+    const geoH = G.tris([[A, B, Rp], [A, Rp, Rm], [D, Cc, Rp], [D, Rp, Rm], [B, Cc, Rp], [A, D, Rm], [A, B, Cc], [A, Cc, D]]);
+    const g = grp('alt').at(cx, 0, cz).rotate(0, rotY, 0);
+    const node = new Node(geoH, { color: hex(C.roofOld), shadow: true });
+    g.add(node); oldRoof.add(g);
+    oldParts.push({ g, node, cx, cz, rotY, ang, zo, yE, hwid, len });
   };
-  // Westflügel: von x=-4.13 (First des Stems) bis Westgiebel inkl. Überstand
-  const wLen = (7.44 + ov) - (-4.13);
-  const r1 = mkRoof('dachW', 4.0, wLen, (7.44 + ov + -4.13) / 2, 3.2, 0, false, true);
-  // Stem: Nord-Süd
-  const r2 = mkRoof('dachS', 3.31, 14.38 + 2 * ov, -4.13, 0.01, Math.PI / 2);
-  // Kappen: Westflügel Ostseite liegt im Stem-Dach, dort nicht zeigen
-  r1.caps[0].visible = false;
-  parts.roof = { group: roof, parts: roofParts, old: null, deck: null, rafters: null, rows: null, ang: r1.ang, zo: r1.zo, yEave: r1.yE, ridge: rs, slopeLen: r1.slopeLen, rowLen: r1.rowLen, z0: 3.2 };
-  // Zugriff für Animationen: Dachfläche Süd des Westflügels (Südost-Seite mit Dachfenstern)
-  const slopePt = (sg, s, x) => ({ p: [x, r1.yE + s * Math.sin(r1.ang) + 0.16, 3.2 + sg * (r1.zo - s * Math.cos(r1.ang))], rot: sg * r1.ang });
-  parts.slopePt = slopePt;
-  // Gauben (Nordseite, Pultdach) und Dachfenster
-  const dormers = grp('gauben');
-  for (const u of [3.0, 6.9]) {
-    const g = grp('gaube'), sp = slopePt(1, 2.7, X(u));
-    g.add(box(2.4, 1.7, 2.0, C.gable, { shadow: true }).at(0, 0.85, 0));
-    g.add(box(2.9, 0.16, 2.6, 0x58545e, { shadow: true }).at(0, 1.82, 0.1).rotate(0.1, 0, 0));
-    g.add(box(1.5, 1.15, 0.1, C.glass).at(0, 0.82, 1.03), box(1.62, 1.27, 0.08, C.frameNew).at(0, 0.82, 1.0));
-    g.at(sp.p[0], sp.p[1] - 0.1, sp.p[2] - 0.2);
-    dormers.add(g);
+  mkOld(4.0, (7.44 + ov) - (-4.13), (7.44 + ov + -4.13) / 2, 3.2, 0, false, true);
+  mkOld(3.31, 14.38 + 2 * ov, -4.13, 0.01, Math.PI / 2, true, true);
+  oldRoof.pos[1] = DIM.dgY + DIM.hDG0;
+  root.add(oldRoof);
+  const oR = oldParts[0];
+  parts.slopePtOld = (sg, s, x) => ({ p: [x, oR.yE + s * Math.sin(oR.ang) + 0.16, 3.2 + sg * (oR.zo - s * Math.cos(oR.ang))], rot: sg * oR.ang });
+
+  // ---------- Neues Dach: ein Satteldach (30°) über das ganze Haus, der freie Teil des "J" ist ausgeschnitten ----------
+  const roof = grp('dach');
+  const al = DIM.pitch, sinA = Math.sin(al), cosA = Math.cos(al);
+  const xe = 7.44 + ov, zoN = 7.2 + ov, SL = zoN / cosA, yR = RISE, yEv = yR - SL * sinA;
+  const NR = 11, rl = SL / NR, xn = X(8.26) + 0.3, lw = 1.8, el = 4 * rl;
+  const roofSlab = (front) => {
+    const sg = front ? 1 : -1;
+    const poly = front ? [[-xe, 0], [-lw, 0], [-lw, el], [lw, el], [lw, 0], [xe, 0], [xe, SL], [-xe, SL]]
+      : [[-xe, 0], [xn, 0], [xn, SL - 2 * rl], [xe, SL - 2 * rl], [xe, SL], [-xe, SL]];
+    const g = G.extrude(poly, 0.16, (x, e, w) => { const sv = SL - e; return [x, yR - sv * sinA + (w + 0.08) * cosA, sg * (sv * cosA + (w + 0.08) * sinA)]; });
+    return new Node(g, { color: hex(C.deck), shadow: true });
+  };
+  const deckF = roofSlab(true), deckB = roofSlab(false);
+  roof.add(deckF, deckB);
+  const alongSlope = (sg, sMid, len, x, w, h, color, off = 0.1) => box(w, h, len, color).at(x, yR - sMid * sinA + off * cosA, sg * (sMid * cosA + off * sinA)).rotate(sg * al, 0, 0);
+  // Sparren
+  const raf = grp('sparren');
+  for (let x = -xe + 0.2; x <= xe - 0.1; x += 1.3) {
+    if (Math.abs(x) > lw + 0.1) raf.add(alongSlope(1, SL / 2, SL, x, 0.14, 0.2, 0xe2b873, -0.14));
+    if (x <= xn) raf.add(alongSlope(-1, SL / 2, SL, x, 0.14, 0.2, 0xe2b873, -0.14)); else raf.add(alongSlope(-1, rl, 2 * rl, x, 0.14, 0.2, 0xe2b873, -0.14));
   }
+  raf.add(box(2 * xe, 0.22, 0.22, 0xe2b873).at(0, yR + 0.05, 0));
+  roof.add(raf);
+  // Ziegelreihen (0 = Traufe ... 10 = First); vorne mit Aussparung für die Loggia, hinten nur über dem Stem
+  const rows = { front: [], back: [] };
+  for (const [side, sg] of [['front', 1], ['back', -1]]) {
+    for (let i = 0; i < NR; i++) {
+      const sc = SL - (i + 0.5) * rl, row = grp('reihe');
+      row.at(0, yR - sc * sinA + 0.22 * cosA, sg * (sc * cosA + 0.22 * sinA));
+      const col = i % 2 ? C.roofNew : C.roofNew2;
+      const seg = (x0, x1) => { const b = box(x1 - x0, 0.12, rl * 0.99, col); b.at((x0 + x1) / 2, 0, 0).rotate(sg * al, 0, 0); row.add(b); };
+      if (side === 'front') { if (i < 4) { seg(-xe, -lw); seg(lw, xe); } else seg(-xe, xe); }
+      else if (i < NR - 2) seg(-xe, xn); else seg(-xe, xe);
+      roof.add(row); rows[side].push(row);
+    }
+  }
+  // Blenden (Traufe, Ortgang, Schnittkanten)
+  const trim = grp('blende'), TC = 0xa5703f;
+  const line = (sg, sMid, len, x, w, h) => trim.add(alongSlope(sg, sMid, len, x, w, h, TC));
+  trim.add(box(xe - lw, 0.2, 0.14, TC).at(-(xe + lw) / 2, yEv - 0.02, zoN).rotate(al, 0, 0), box(xe - lw, 0.2, 0.14, TC).at((xe + lw) / 2, yEv - 0.02, zoN).rotate(al, 0, 0));
+  trim.add(box(xe + xn, 0.2, 0.14, TC).at((xn - xe) / 2, yEv - 0.02, -zoN).rotate(-al, 0, 0));
+  for (const sx of [-1, 1]) line(1, SL / 2, SL + 0.1, sx * (xe + 0.02), 0.14, 0.18);
+  line(-1, SL / 2, SL + 0.1, -(xe + 0.02), 0.14, 0.18);
+  line(-1, rl, 2 * rl + 0.1, xe + 0.02, 0.14, 0.18);
+  line(-1, (SL + 2 * rl) / 2, SL - 2 * rl, xn, 0.14, 0.18);
+  trim.add(box(xe - xn, 0.2, 0.14, TC).at((xe + xn) / 2, yR - 2 * rl * sinA - 0.02, -2 * rl * cosA).rotate(-al, 0, 0));
+  for (const sx of [-1, 1]) line(1, SL - el / 2, el, sx * lw, 0.14, 0.18);
+  trim.add(box(2 * lw, 0.2, 0.14, TC).at(0, yR - (SL - el) * sinA - 0.02, (SL - el) * cosA).rotate(al, 0, 0));
+  roof.add(trim);
+  roof.pos[1] = DIM.dgY + DIM.knee;
+  root.add(roof);
+  // Zugriff für Animationen: Dachfläche, s = Abstand von der Traufe entlang der Schräge (sg = +1 Straßenseite, -1 Gartenseite)
+  const slopePt = (sg, s, x) => ({ p: [x, yEv + s * sinA + 0.32, sg * (zoN - s * cosA)], rot: sg * al });
+  parts.slopePt = slopePt;
+  parts.roof = { group: roof, oldGroup: oldRoof, oldParts, raf, deck: [deckF, deckB], trim, rows, rowLen: rl, nRows: NR, slopeLen: SL, ang: al, zo: zoN, yE: yEv, ridge: yR, xe, xn, lw, el, knee: DIM.knee, z0: 0 };
+  // Gauben: links und rechts nah am Rand, dazwischen die Loggia
+  const dormers = grp('gauben'), dormerBodies = [];
+  const DH = 2.15, zS = (yR - DH) / TAN, dep = DZF - zS;
+  for (const u of dormerU) {
+    const g = grp('gaube'), x = X(u);
+    const body = box(2.4, DH + 0.1, dep, C.gable, { shadow: true }).at(x, (DH - 0.1) / 2, (DZF + zS) / 2);
+    g.add(body, box(2.9, 0.14, dep + 0.5, 0x58545e, { shadow: true }).at(x, DH + 0.08, (DZF + zS) / 2 + 0.1).rotate(0.05, 0, 0));
+    dormerBodies.push(body); dormers.add(g);
+  }
+  roof.add(dormers);
+  // Loggia (im Dach ausgeschnitten): Boden, Brüstung, Möbel
+  const loggia = grp('loggia');
+  loggia.add(box(2 * lw - 0.1, 0.06, 7.2 - 4.93, C.wood).at(0, DIM.dgY + 0.03, (7.2 + 4.93) / 2));
+  loggia.add(new Node(G.box(2 * lw, 0.95, 0.05), { color: hex(0xcfe9f2), alpha: 0.55 }).at(0, DIM.dgY + 0.5, 7.14), box(2 * lw, 0.06, 0.08, 0xb9895b).at(0, DIM.dgY + 1.0, 7.14));
+  loggia.add(cylN(0.4, 0.4, 0.05, 0xf2eee4, 10).at(0.3, DIM.dgY + 0.7, 5.9), cylN(0.05, 0.05, 0.7, 0x8a929a, 6).at(0.3, DIM.dgY + 0.35, 5.9), box(0.4, 0.06, 0.4, 0xe0553f).at(-0.5, DIM.dgY + 0.42, 5.9), box(0.4, 0.06, 0.4, 0xe0553f).at(1.1, DIM.dgY + 0.42, 5.9));
+  floors.dg.shell.add(loggia);
   const skylights = grp('dachfenster');
   const mkSky = (sg, s, x) => {
     const sp = slopePt(sg, s, x), g = grp('dfw');
@@ -358,16 +429,15 @@ export function buildHouse(engine) {
     g.at(sp.p[0], sp.p[1] + 0.06, sp.p[2]).rotate(sp.rot, 0, 0);
     skylights.add(g);
   };
-  mkSky(-1, 3.3, X(8.8)); mkSky(-1, 3.3, X(10.6)); // sitzen im Westflügel-Dach hinten
-  roof.add(dormers, skylights);
+  mkSky(-1, 6.6, -2.6); mkSky(-1, 6.6, -5.6);
+  roof.add(skylights);
   const chimney = grp('kamin');
   chimney.add(box(0.8, 2.4, 0.8, 0xc98f6b, { shadow: true }).at(0, 1.2, 0), box(1.0, 0.18, 1.0, 0x58545e).at(0, 2.45, 0), box(0.5, 0.1, 0.5, 0x2f2a2c).at(0, 2.55, 0));
-  chimney.at(X(2.6), r1.ridge ?? rs - 0.2, 3.2); chimney.pos[1] = rs - 0.35;
+  chimney.at(X(2.6), yR - 0.6, 0);
   roof.add(chimney);
   parts.chimney = chimney;
-  root.add(roof);
   parts.dormers = dormers; parts.skylights = skylights;
-  // Solarpaneele auf der Südost-Fläche
+  // Solarpaneele auf der Südost-Fläche (Gartenseite des Stems, mit den Dachflächenfenstern)
   const solar = grp('solar'), panels = [];
   const addPanel = (s, x) => {
     const sp = slopePt(-1, s, x), g = grp('panel');
@@ -378,9 +448,7 @@ export function buildHouse(engine) {
     g.rest = { p: [...sp.p], rot: sp.rot };
     solar.add(g); panels.push(g);
   };
-  for (const u of [2.0, 3.8, 5.6, 7.4]) addPanel(0.9, X(u));
-  for (const u of [2.0, 3.8, 5.6, 7.4]) addPanel(2.1, X(u));
-  for (const u of [2.0, 3.8]) addPanel(3.3, X(u));
+  for (const s of [1.4, 2.7, 4.0]) for (const x of [-2.5, -4.25, -6.0]) addPanel(s, x);
   roof.add(solar);
   parts.solar = { group: solar, panels };
 
@@ -521,7 +589,7 @@ export function buildHouse(engine) {
   };
   mkKitchen('eg', 6.6, 0.7, 3.0); mkKitchen('dg', 5.0, 4.3, 2.4);
   parts.interior = interior;
-  parts.slopeInfo = { ang: r1.ang, zo: r1.zo, yEave: r1.yE, ridge: rs };
+  parts.slopeInfo = { ang: al, zo: zoN, yEave: yEv, ridge: yR };
 
   // ---------- Zustand ----------
   const state = { litForce: null, p: {}, s: 0, view: 'aussen', floor: 'alle', lit: false };
@@ -538,24 +606,24 @@ export function buildHouse(engine) {
     const s = clamp(P('aufstockung'), 0, 1);
     state.s = s;
     const hh = dgH(s);
-    for (const { node } of dgWalls) { node.scale[1] = hh / DIM.hDG1; node.pos[1] = DIM.dgY + hh / 2; setCol(node, s > 0 ? C.rawBrick : C.oldWall); }
-    balc.visible = hh >= 2.05;   // Balkon (mit Tür) erst, wenn das Obergeschoss steht
+    dgOld.forEach(({ node }) => { node.visible = s <= 0; });
+    dgNew.forEach(({ node, e, i }) => { node.visible = s > 0; if (s > 0) node.geo = wallGeo('w' + i, e, t, t / 2, hh); });
+    balc.visible = s > 0 && hh >= 2.05;   // Balkon (mit Tür) erst, wenn die Wand hoch genug ist
+    loggia.visible = s > 0.05;
     const d = P('dach');
-    roof.pos[1] = DIM.dgY + hh;
     const showOld = s <= 0 && d <= 0;
     const tileP = clamp((d - 0.25) / 0.75, 0, 1);
-    const nVis = Math.round(tileP * 12 + 1e-6);
-    for (const rp of roofParts) {
-      rp.old.visible = showOld;
-      rp.raf.visible = d > 0 && d < 1;
-      rp.deck.visible = d > 0.25;
-      rp.trim.visible = d > 0.25;
-      for (const side of ['front', 'back']) rp.rows[side].forEach((r, i) => { r.visible = i < nVis; });
-      setCol(rp.old, C.roofOld);
-      const capC = P('fassade') > 0.5 ? C.plaster : P('daemmung') > 0.5 ? C.insul : s > 0 ? C.rawBrick : C.oldWall;
-      rp.caps.forEach((c) => setCol(c, capC));
-      rp.caps.forEach((c, i) => { if (!(rp === r1 && i === 0)) c.visible = !showOld; });
-    }
+    const nVis = Math.round(tileP * NR + 1e-6);
+    deckF.visible = deckB.visible = d > 0.25;
+    raf.visible = d > 0 && d < 1; trim.visible = d > 0.25;
+    for (const side of ['front', 'back']) rows[side].forEach((r, i) => { r.visible = i < nVis; });
+    const capC = P('fassade') > 0.5 ? C.plaster : P('daemmung') > 0.5 ? C.insul : s > 0 ? C.rawBrick : C.oldWall;
+    dormerBodies.forEach((b) => setCol(b, capC));
+    ovNew.forEach((o) => {
+      const f = P(o.key), Lo = f * hh;
+      o.node.visible = s > 0 && Lo > 0.05;
+      if (o.node.visible) o.node.geo = wallGeo('o' + o.i, o.e, o.th, 0.15, Math.max(Lo, 0.1));
+    });
     parts.chimney.visible = d >= 0.7;
     parts.dormers.visible = d >= 0.7; parts.skylights.visible = d >= 0.7;
     const sp = P('solar');
@@ -565,7 +633,7 @@ export function buildHouse(engine) {
     state.lit = state.litForce ?? (sp >= 1);
     for (const o of overlays) {
       const f = P(o.key), H = o.Hf(), h = H * f;
-      o.node.visible = h > 0.02;
+      o.node.visible = h > 0.02 && (o.lvl !== 'dg' || s <= 0);
       o.node.scale[1] = Math.max(h, 0.001);
       o.node.pos[1] = o.y0 + h / 2;
     }
@@ -576,7 +644,7 @@ export function buildHouse(engine) {
       w.newF.visible = installed;
       w.oldF.visible = !installed && w.hasOld;
       w.hole.visible = !installed && !w.hasOld;
-      w.g.visible = w.lvl !== 'dg' || w.top <= hh + 0.01;
+      w.g.visible = w.lvl !== 'dg' || (s > 0 && w.top <= hh + 0.01 && (!w.dormer || d >= 0.7));
       w.glass.emissive = state.lit ? 1 : 0;
       setCol(w.glass, state.lit ? 0xffe08a : C.glass);
     }
@@ -637,6 +705,7 @@ export function buildHouse(engine) {
     }
     roof.opacity = inside ? 0 : 1;
     roof.visible = !inside;
+    oldRoof.visible = !inside && state.s <= 0 && P('dach') <= 0;
     parts.stair.opacity = inside ? 0.35 : 1;
   }
 

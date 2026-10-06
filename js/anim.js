@@ -339,12 +339,14 @@ async function solar(ctx) {
   const gy = roof.group.pos[1];
   house.setView('aussen');
   panels.forEach((p) => { p.visible = false; });
-  engine.flyTo({ az: Math.PI - 0.5, el: 0.36, r: 34, target: [6, 4.5, 1] }, S(1500));
+  engine.flyTo({ az: Math.PI - 0.45, el: 0.36, r: 36, target: [-1, 4.5, -3] }, S(1500));
   // Transporter fährt über die Wiese an die Westseite
   const van = makeVan(0xf4f1ea, 0xf2a900); van.at(12.8, STREET_Y, 17.5); faceDir(van, 0, -1); fx.add(van);
-  await driveTo(van, [12.8, 0, -1.0], 3200, ease.inOut, true);
-  const rx = DIM.hw + 1.9;
-  const zFoot = roof.z0 - roof.zo - 2.7;
+  await driveTo(van, [12.8, 0, -9.6], 3600, ease.inOut, true);
+  faceDir(van, -1, 0);
+  const rx = -4.25;
+  await driveTo(van, [rx + 5.5, 0, -9.6], 2200, ease.inOut, true);
+  const zFoot = -roof.zo - 2.7;
   // Lift: steile Leiter vom Boden zur Traufe, dann entlang der Dachfläche
   const eave = parts.slopePt(-1, 0, rx).p;
   const eaveW = [rx, eave[1] + gy + 0.15, eave[2]];
@@ -378,8 +380,8 @@ async function solar(ctx) {
   for (let i = 0; i < 8; i++) { const q = bx(1.7, 0.07, 1.05, 0x2a4a9a).at(0, 0.24 + i * 0.09, 0); pal.add(q); pile.push(q); }
   pal.at(rx + 1.2, 0, zFoot - 1.0); fx.add(pal);
   // Besatzung
-  const driver = mk(LOOKS.bau, 12.8 + 1.3, 0, -1.0 + 0.5);
-  const mate = mk(LOOKS.bauin, 12.8 + 1.3, 0, -2.2);
+  const driver = mk(LOOKS.bau, rx + 6.6, 0, -9.0);
+  const mate = mk(LOOKS.bauin, rx + 6.6, 0, -10.3);
   const roofer = mk(LOOKS.profi, rx, 0, zFoot + 1.0);
   await Promise.all([walkTo(driver, [rx + 1.2, 0, zFoot - 2.0]), walkTo(mate, [rx + 0.4, 0, zFoot - 1.9])]);
   faceDir(driver.root, 0, 1); faceDir(mate.root, 0, 1);
@@ -401,7 +403,7 @@ async function solar(ctx) {
     const targets = batch.map((k) => panels[k]);
     const sMax = Math.max(...targets.map((pn) => (pn.rest.p[2] - roof.z0 + roof.zo) / Math.cos(roof.ang)));
     await tw(900, (t) => carAt(1 + lerp(0, sMax / 10, ease.inOut(t))));
-    const standS = Math.max(0.3, sMax - 0.5), sq = parts.slopePt(-1, standS, 7.4);
+    const standS = Math.max(0.3, sMax - 0.5), sq = parts.slopePt(-1, standS, rx);
     const rFrom = [...roofer.root.pos];
     await tw(600, (t) => { roofer.root.pos[0] = lerp(rFrom[0], sq.p[0], t); roofer.root.pos[1] = lerp(rFrom[1], sq.p[1] + gy - 0.12, t); roofer.root.pos[2] = lerp(rFrom[2], sq.p[2], t); setPose(roofer, walkPose(t * 6, 0.8)); });
     faceDir(roofer.root, 1, 0);
@@ -432,18 +434,21 @@ async function solar(ctx) {
   house.setProgress({ ...house.state.p, solar: real?.solar ?? 100 });
   if ((real?.solar ?? 100) >= 100) {
     const flash = new Node(G.sphere(1, 8, 5), { color: hex(0xffffff), unlit: true, emissive: 1, outline: false, alpha: 0.9 });
-    flash.at(2, gy + 4.5, 0); fx.add(flash);
+    flash.at(-3.5, gy + 6, -2); fx.add(flash);
     setPose(roofer, POSES.wave(0));
     await tw(560, (t) => { flash.size(1 + t * 18); flash.opacity = 1 - t; });
     fx.remove(flash);
     house.setLit(false);
     await wait(300);
     house.setLit(null);
-    burst([2, gy + 3.5, 0], 28, 0xffe08a, 4.5, 1000, 0.1);
+    burst([-3.5, gy + 5, -2], 28, 0xffe08a, 4.5, 1000, 0.1);
     await tw(1400, (t) => setPose(roofer, POSES.wave(t * 3)));
   }
   [driver, mate, roofer].forEach((w) => fx.remove(w.root));
-  await driveTo(van, [12.8, STREET_Y, 17.5], 2600, ease.in, true);
+  faceDir(van, 1, 0);
+  await driveTo(van, [12.8, 0, -9.6], 2200, ease.in, true);
+  faceDir(van, 0, 1);
+  await driveTo(van, [12.8, STREET_Y, 17.5], 3000, ease.in, true);
   fx.remove(van);
 }
 
@@ -491,8 +496,9 @@ async function entkernung(ctx) {
   const cx = cont.pos[0];
 
   // Dachluke + Rutsche (vom Dach in den Container)
-  const roofY = parts.roof.group.pos[1];
-  const hx = Math.max(0.6, Math.min(6.0, cx)), sp0 = parts.slopePt(1, 0.9, hx);
+  const oldR = parts.roof.oldGroup.visible;
+  const roofY = oldR ? parts.roof.oldGroup.pos[1] : parts.roof.group.pos[1];
+  const hx = oldR ? Math.max(0.6, Math.min(6.0, cx)) : Math.max(2.7, Math.min(3.3, cx)), sp0 = (oldR ? parts.slopePtOld : parts.slopePt)(1, 0.9, hx);
   const hatchW = [sp0.p[0], roofY + sp0.p[1] + 0.12, sp0.p[2]];
   const hatch = grp('dachluke');
   hatch.add(bx(1.5, 0.12, 1.6, 0x58545e), bx(1.1, 0.14, 1.2, 0x2b2528));
@@ -691,10 +697,11 @@ async function aufstockung(ctx) {
   const T = tools(ctx);
   const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
   const parts = house.parts, roof = parts.roof;
-  const roofY = roof.group.pos[1], hasOld = (house.state.p.dach ?? 0) <= 0;
+  const roofY = roof.oldGroup.pos[1], hasOld = (house.state.p.dach ?? 0) <= 0;
   const zRow = 15.2, cxs = 2.0;
-  const dgH = (s) => lerp(DIM.hDG0, DIM.hDG1, s);
-  const setS = (p) => { house.setProgress({ ...house.state.p, aufstockung: p }); if (p < 60) roof.parts.forEach((rp) => rp.caps.forEach((c) => { c.visible = false; })); };
+  const TOPMAX = DIM.knee + 7.2 * Math.tan(DIM.pitch);
+  const Lof = (s) => lerp(DIM.hDG0, TOPMAX + 0.02, s);
+  const setS = (p) => house.setProgress({ ...house.state.p, aufstockung: p });
   house.setView('aussen');
 
   // 1) Autokran fährt vor und stützt sich ab
@@ -708,12 +715,13 @@ async function aufstockung(ctx) {
   const w1 = mk(LOOKS.bau, cxs + 5.5, STREET_Y, 14.2), w2 = mk(LOOKS.profi, cxs + 6.5, STREET_Y, 14.6);
   faceDir(w1.root, -1, -0.3); setPose(w1, POSES.point); faceDir(w2.root, -1, -0.3);
 
-  // 2) Dach anschlagen und abheben
-  const C = [(roof.parts[0].cx + roof.parts[1].cx) / 2, (roof.parts[0].cz + roof.parts[1].cz) / 2];
+  // 2) Altes Walmdach anschlagen und abheben
+  const op = roof.oldParts;
+  const C = [(op[0].cx + op[1].cx) / 2, (op[0].cz + op[1].cz) / 2];
   const ground = new Node(null); fx.add(ground);
   const ghost = grp('altesDach'); ground.add(ghost);
   if (hasOld) {
-    for (const rp of roof.parts) { const g = grp('gd').at(rp.cx - C[0], 0, rp.cz - C[1]); g.rot[1] = rp.rotY; g.add(new Node(rp.old.geo, { color: hex(0xc9633b), shadow: true })); ghost.add(g); }
+    for (const rp of op) { const g = grp('gd').at(rp.cx - C[0], 0, rp.cz - C[1]); g.rot[1] = rp.rotY; g.add(new Node(rp.node.geo, { color: hex(0xc9633b), shadow: true })); ghost.add(g); }
     const beam = bx(7.6, 0.2, 0.2, 0x4a4f56).at(0, 3.6, 0);
     const s1 = bx(4.05, 0.07, 0.07, 0x2b2e34, { outline: false }).at(1.8, 4.5, 0); s1.rot[2] = -0.4636;
     const s2 = bx(4.05, 0.07, 0.07, 0x2b2e34, { outline: false }).at(-1.8, 4.5, 0); s2.rot[2] = 0.4636;
@@ -731,8 +739,7 @@ async function aufstockung(ctx) {
   engine.flyTo({ az: 0.3, el: 0.35, r: 34, target: [-0.5, 5, 6] }, S(1400));
   const hook0 = [C[0], roofY + 5.4, C[1]];
   await go([C[0], hook0[1] + 3, C[1] + 2], 2200);
-  // Rigger auf dem First
-  const rg = mk(LOOKS.profi, roof.parts[0].cx + 1.2, roofY + 1.85, 3.2, fx);
+  const rg = mk(LOOKS.profi, op[0].cx + 1.2, roofY + 1.85, 3.2, fx);
   faceDir(rg.root, 0, 1); setPose(rg, POSES.wave(0));
   await go(hook0, 1600, ease.inOut);
   await tw(700, (t) => setPose(rg, POSES.wave(t * 4)));
@@ -742,7 +749,6 @@ async function aufstockung(ctx) {
   burst([C[0], roofY + 5.4, C[1]], 10, 0xffe9a0, 2, 500);
   await wait(500);
   fx.remove(rg.root); puff([rg.root.pos[0], rg.root.pos[1], rg.root.pos[2]], 3, 0.5);
-  // anheben, über das Haus schwenken, im Garten absetzen
   const lift = [C[0], hook0[1] + 6.5, C[1]];
   await go(lift, 2400, ease.inOut, ghost, 5.4);
   engine.flyTo({ az: 0.9, el: 0.45, r: 40, target: [-0.5, 4, 0] }, S(2600));
@@ -756,49 +762,51 @@ async function aufstockung(ctx) {
   ground.remove(ghost);
   if (!hasOld) setS(0.01);
 
-  // 3) Gerüst + Palette mit Steinen
-  engine.flyTo({ az: 0.35, el: 0.3, r: 32, target: [2.5, 4, 7] }, S(1500));
+  // 3) Gerüst am Westgiebel + Palette mit Steinen
+  engine.flyTo({ az: 0.8, el: 0.3, r: 30, target: [2.5, 4, 3] }, S(1500));
   const scaf = grp('geruest'); fx.add(scaf);
-  const posts = [], px = [0.4, 2.8, 5.2, 7.2].map((u) => 7.44 - u);
-  for (const x of px) for (const z of [7.9, 8.9]) { const p = bx(0.12, 1, 0.12, 0x9aa1a8, { outline: false }); scaf.add(p); posts.push({ p, x, z }); }
-  const plat = bx(7.8, 0.1, 1.3, 0xc8964f).at(7.44 - 3.9, 0, 8.4); const rail = bx(7.8, 0.06, 0.06, 0x9aa1a8, { outline: false }).at(7.44 - 3.9, 0, 8.95);
+  const gx = 7.44 + 1.3, zs = [-0.3, 2.3, 4.9, 6.9];
+  const posts = [];
+  for (const z of zs) for (const x of [gx - 0.55, gx + 0.65]) { const p = bx(0.12, 1, 0.12, 0x9aa1a8, { outline: false }); scaf.add(p); posts.push({ p, x, z }); }
+  const plat = bx(1.3, 0.1, 7.8, 0xc8964f).at(gx, 0, 3.3), rail = bx(0.06, 0.06, 7.8, 0x9aa1a8, { outline: false }).at(gx + 0.65, 0, 3.3);
   scaf.add(plat, rail);
-  const setScaf = (s) => {
-    const hh = dgH(s), py = DIM.dgY + 0.1 + (hh - 1.0) * 0.8;
+  const setScaf = (L) => {
+    const py = Math.max(DIM.dgY + 0.1, DIM.dgY + L - 1.25);
     plat.pos[1] = py; rail.pos[1] = py + 1.0;
-    posts.forEach(({ p, x, z }) => { const h = py + 1.3; p.size(1, h, 1).at(x, h / 2, z); });
+    posts.forEach(({ p, x, z }) => { const h = py + 1.4; p.size(1, h, 1).at(x, h / 2, z); });
     return py;
   };
-  let py = setScaf(0);
-  const b1 = mk(LOOKS.bau, 7.44 - 5.8, py, 8.4, fx), b2 = mk(LOOKS.bauin, 7.44 - 2.2, py, 8.4, fx);
-  faceDir(b1.root, 0, -1); faceDir(b2.root, 0, -1);
+  let py = setScaf(Lof(0));
+  const b1 = mk(LOOKS.bau, gx, py, 1.0, fx), b2 = mk(LOOKS.bauin, gx, py, 5.6, fx);
+  faceDir(b1.root, -1, 0); faceDir(b2.root, -1, 0);
   const pal = makePallet(); fx.add(pal); pal.at(cxs - 1.5, terrainY(12.4), 12.4);
   await go([cxs - 1.5, 4, 12.4], 1500);
   await go([cxs - 1.5, 1.6, 12.4], 900);
   await wait(300);
-  await go([7.44 - 6.8, DIM.dgY + 4.5, 8.4], 2600, ease.inOut, pal, 1.6);
-  await go([7.44 - 6.8, py + 1.9, 8.4], 1200, ease.inOut, pal, 1.6);
-  pal.at(7.44 - 6.8, py + 0.08, 8.4);
+  await go([gx, DIM.dgY + 5.5, 3.3], 2600, ease.inOut, pal, 1.6);
+  await go([gx, py + 1.9, 3.3], 1200, ease.inOut, pal, 1.6);
+  pal.at(gx, py + 0.08, 3.3);
   await go([cxs, 7, zRow - 4], 1500);
 
-  // 4) Das Obergeschoss wächst Reihe für Reihe
-  engine.flyTo({ az: 0.55, el: 0.3, r: 24, target: [0.5, 4.2, 5] }, S(1400));
-  const rows = 14;
-  const layL = (async () => { for (let i = 0; i < rows * 3; i++) { setPose(b1, { ...POSES.push, lArm: 1.0 + Math.sin(i * 1.3) * 0.25 }); walkTo(b1, [7.44 - 4.6 - (i % 3) * 1.1, b1.root.pos[1], 8.4], { speed: 2 }); await wait(160); } })();
+  // 4) Giebel, Wand zum ausgeschnittenen Teil und Rückwand wachsen Reihe für Reihe bis unter das Dach
+  engine.flyTo({ az: 0.85, el: 0.32, r: 26, target: [1.5, 5, 2.5] }, S(1400));
+  const rows = 16;
+  const layL = (async () => { for (let i = 0; i < rows * 3; i++) { setPose(b1, { ...POSES.push, lArm: 1.0 + Math.sin(i * 1.3) * 0.25 }); walkTo(b1, [gx, b1.root.pos[1], 0.8 + (i % 3) * 1.0], { speed: 2 }); await wait(190); } })();
   for (let k = 1; k <= rows; k++) {
-    const s = k / rows;
-    setS(s * 100);
-    py = setScaf(s);
+    const sk = k / rows;
+    setS(sk * 100);
+    py = setScaf(Lof(sk));
     b1.root.pos[1] = py; b2.root.pos[1] = py;
     setPose(b2, { ...POSES.push, rArm: 1.0 + (k % 2) * 0.4 });
-    pal.size(1, 1 - s * 0.7, 1);
-    if (k % 3 === 0) burst([7.44 - 3 - (k % 4), DIM.dgY + dgH(s), 7.2], 4, 0xd9946b, 1.5, 400);
-    await wait(520);
+    pal.size(1, 1 - sk * 0.7, 1); pal.pos[1] = py + 0.08;
+    if (k % 2 === 0) burst([gx - 1, DIM.dgY + Lof(sk), 1 + (k % 4)], 4, 0xd9946b, 1.5, 400);
+    if (k === 6) engine.flyTo({ az: 0.9, el: 0.3, r: 28, target: [1.5, 6, 2.5] }, S(1500));
+    await wait(560);
   }
   await layL;
   setS(100);
   setPose(b1, POSES.wave(0)); setPose(b2, POSES.thumbs);
-  await burst([0, DIM.dgY + 3, 3], 24, 0xffd166, 4, 1000, 0.1);
+  await burst([0, DIM.dgY + 5, 0], 24, 0xffd166, 4, 1000, 0.1);
   await wait(500);
 
   // 5) Abbau, Kran fährt ab
@@ -817,26 +825,24 @@ async function dach(ctx) {
   const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
   const parts = house.parts, roof = parts.roof, rY = roof.group.pos[1];
   house.setView('aussen');
-  // Zustand: nur Sparren sichtbar, Dach-Aufbauten weg
   house.setProgress({ ...house.state.p, dach: 1 });
   parts.chimney.visible = false; parts.dormers.visible = false; parts.skylights.visible = false;
-  const rafters = [];
-  roof.parts.forEach((rp) => rp.raf.children.forEach((c) => { rafters.push({ c, rest: [...c.pos], rot: [...c.rot], rp }); c.visible = false; }));
-  engine.flyTo({ az: 0.3, el: 0.4, r: 36, target: [0, 5, 4] }, S(1400));
+  const rafters = roof.raf.children.map((c) => { const r = { c, rest: [...c.pos], rot: [...c.rot] }; c.visible = false; return r; });
+  engine.flyTo({ az: 0.3, el: 0.4, r: 38, target: [0, 6, 2] }, S(1400));
 
   // Transporter bringt die Dachdecker
   const van = makeVan(0xf4f1ea, 0x2f7be0); van.at(-12, STREET_Y, 15.4); fx.add(van);
   await driveTo(van, [4.5, STREET_Y, 15.4], 3000, ease.out, false);
   const r1 = mk(LOOKS.bau, 6.5, STREET_Y, 14.0), r2 = mk(LOOKS.bauin, 7.4, STREET_Y, 14.4);
   faceDir(r1.root, 0, -1); faceDir(r2.root, 0, -1);
-  await Promise.all([walkTo(r1, [3.5, null, 10.0], { speed: 2.6 }), walkTo(r2, [5.0, null, 10.3], { speed: 2.6 })]);
+  await Promise.all([walkTo(r1, [3.2, null, 10.0], { speed: 2.6 }), walkTo(r2, [4.4, null, 10.3], { speed: 2.6 })]);
   setPose(r1, POSES.point); setPose(r2, POSES.thumbs);
 
   // 1) Sparren fliegen ein
   await wait(300);
   rafters.sort((a, b) => a.rest[0] - b.rest[0]);
   const fly = rafters.map((r, i) => (async () => {
-    await wait(i * 55);
+    await wait(i * 38);
     const { c, rest, rot } = r;
     c.visible = true;
     const from = [rest[0] + (Math.random() - 0.5) * 5, rest[1] + 9 + Math.random() * 3, rest[2] + (Math.random() - 0.5) * 5];
@@ -848,45 +854,44 @@ async function dach(ctx) {
     c.pos = [...rest]; c.rot = [...rot];
   })());
   await Promise.all(fly);
-  burst([0, rY + 2, 2], 14, 0xe2b873, 3, 600);
+  burst([0, rY + 4, 0], 14, 0xe2b873, 3, 600);
   await wait(300);
 
   // 2) Dachschalung + Blenden
   house.setProgress({ ...house.state.p, dach: 26 });
-  roof.parts.forEach((rp) => { rp.deck.opacity = 0; rp.trim.visible = true; });
-  await tw(900, (t) => roof.parts.forEach((rp) => { rp.deck.opacity = t; }));
-  roof.parts.forEach((rp) => { rp.deck.opacity = 1; });
-  // Dachdecker steigen aufs Dach
-  const eaveAt = (s) => { const q = parts.slopePt(1, s, 7.44 - 3.6); return [q.p[0], rY + q.p[1] - 0.05, q.p[2]]; };
-  puff([3.5, 0.5, 10], 4, 0.5);
-  r1.root.pos = [...eaveAt(0.3)]; r2.root.pos = [...eaveAt(0.3)]; r2.root.pos[0] += 1.6; faceDir(r1.root, 0, -1); faceDir(r2.root, 0, -1);
-  engine.flyTo({ az: 0.25, el: 0.38, r: 28, target: [0, 5.5, 4] }, S(1300));
+  roof.deck.forEach((dk) => { dk.opacity = 0; });
+  await tw(900, (t) => roof.deck.forEach((dk) => { dk.opacity = t; }));
+  roof.deck.forEach((dk) => { dk.opacity = 1; });
+  const RX = 3.0;
+  const eaveAt = (s) => { const q = parts.slopePt(1, s, RX); return [q.p[0], rY + q.p[1] - 0.3, q.p[2]]; };
+  puff([3.2, 0.5, 10], 4, 0.5);
+  r1.root.pos = [...eaveAt(0.3)]; r2.root.pos = [...eaveAt(0.3)]; r2.root.pos[0] += 1.0; faceDir(r1.root, 0, -1); faceDir(r2.root, 0, -1);
+  engine.flyTo({ az: 0.25, el: 0.4, r: 32, target: [0, 6, 3] }, S(1300));
 
-  // 3) Ziegelreihen fallen von unten nach oben
-  roof.parts.forEach((rp) => { rp.rows.front.concat(rp.rows.back).forEach((r) => { r.visible = false; }); });
-  const rowFall = async (r, i) => {
+  // 3) Ziegelreihen fallen von unten nach oben (beide Dachseiten, vorne mit Loggia-Aussparung)
+  [...roof.rows.front, ...roof.rows.back].forEach((r) => { r.visible = false; });
+  const rowFall = async (r) => {
     const rest = [...r.pos]; r.visible = true;
-    r.pos[1] = rest[1] + 5.5; r.opacity = 1;
-    await tw(520, (t) => { r.pos[1] = lerp(rest[1] + 5.5, rest[1], t * t); });
+    r.pos[1] = rest[1] + 5.5;
+    await tw(480, (t) => { r.pos[1] = lerp(rest[1] + 5.5, rest[1], t * t); });
     r.pos = rest;
   };
-  for (let i = 0; i < 12; i++) {
-    const jobs = [];
-    for (const rp of roof.parts) { jobs.push(rowFall(rp.rows.front[i], i), rowFall(rp.rows.back[i], i)); }
+  for (let i = 0; i < roof.nRows; i++) {
+    const jobs = [rowFall(roof.rows.front[i]), rowFall(roof.rows.back[i])];
     const s = (i + 0.5) * roof.rowLen + 0.4;
     r1.root.pos = [...eaveAt(Math.min(s, roof.slopeLen - 0.4))]; setPose(r1, i % 2 ? POSES.push : POSES.carry);
     r2.root.pos[1] = r1.root.pos[1]; r2.root.pos[2] = r1.root.pos[2]; setPose(r2, i % 2 ? POSES.carry : POSES.push);
-    await Promise.all([...jobs, wait(300)]);
+    await Promise.all([...jobs, wait(280)]);
     if (i % 3 === 2) burst([r1.root.pos[0], r1.root.pos[1] + 0.5, r1.root.pos[2]], 6, 0x6a6672, 2, 450);
   }
   await wait(300);
 
   // 4) Kamin, Gauben, Dachfenster
-  const pop = async (node, ms = 600) => { node.visible = true; await tw(ms, (t) => { node.size(1 + Math.sin(t * Math.PI) * 0.25 * (1 - t) + (t - 1) * 0.0 + (t < 1 ? 0 : 0)); }, ease.out); node.size(1); };
+  const pop = async (node, ms = 600) => { node.visible = true; await tw(ms, (t) => { node.size(1 + Math.sin(t * Math.PI) * 0.25 * (1 - t)); }, ease.out); node.size(1); };
   await Promise.all([pop(parts.chimney), pop(parts.dormers, 800), pop(parts.skylights, 800)]);
-  roof.parts.forEach((rp) => { rp.raf.visible = false; });
+  roof.raf.visible = false;
   house.setProgress({ ...house.state.p, dach: 100 });
-  burst([0, rY + 4, 2], 28, 0xffd166, 4, 1100, 0.1);
+  burst([0, rY + 5, 0], 28, 0xffd166, 4, 1100, 0.1);
   setPose(r1, POSES.wave(0)); setPose(r2, POSES.thumbs);
   await tw(1200, (t) => setPose(r1, POSES.wave(t * 3)));
   puff([r1.root.pos[0], r1.root.pos[1], r1.root.pos[2]], 3, 0.5);
