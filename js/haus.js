@@ -460,7 +460,7 @@ export function buildHouse(engine) {
   for (const lvl of ['kg', 'eg', 'dg']) {
     sockPos[lvl].forEach(([u, v]) => { const s = box(0.14, 0.14, 0.14, C.copper).at(X(u), lvlY[lvl] + 0.4, Z(v)); s.lvl = lvl; floors[lvl].inner.add(s); interior.sockets.push(s); });
     const yy = lvlY[lvl] + 2.4;
-    const cab = [box(14.2, 0.05, 0.05, 0x33383d).at(X(7.4), yy, Z(0.5)), box(0.05, 0.05, 7.6, 0x33383d).at(X(0.5), yy, Z(4.0)), box(0.05, 0.05, 13.4, 0x33383d).at(X(14.4), yy, Z(7.0))];
+    const cab = [box(14.2, 0.09, 0.09, C.copper).at(X(7.4), yy, Z(0.5)), box(0.09, 0.09, 7.6, C.copper).at(X(0.5), yy, Z(4.0)), box(0.09, 0.09, 13.4, C.copper).at(X(14.4), yy, Z(7.0))];
     cab.forEach((c) => { c.lvl = lvl; floors[lvl].inner.add(c); interior.cables.push(c); });
   }
   // Sanitär: Steigleitung bei u≈10.8, v≈4.3
@@ -479,6 +479,15 @@ export function buildHouse(engine) {
     }
     const hp = box(10.0, 0.07, 0.07, C.pipeB).at(X(7.4), lvlY[lvl] + 0.07, Z(0.5)); hp.lvl = lvl; hp.flat = true;
     floors[lvl].inner.add(hp); interior.pipes.push(hp);
+  }
+  // Sanitärobjekte (Bad nahe der Steigleitung), erscheinen gegen Ende der Sanitär-Phase
+  interior.fixtures = [];
+  for (const lvl of ['eg', 'dg']) {
+    const f = grp('bad'); f.lvl = lvl;
+    f.add(box(0.42, 0.42, 0.55, 0xf6f6f2).at(X(10.3), lvlY[lvl] + 0.21, Z(3.0)), box(0.42, 0.55, 0.2, 0xf6f6f2).at(X(10.3), lvlY[lvl] + 0.5, Z(2.7) - 0.2));
+    f.add(box(0.62, 0.14, 0.46, 0xf6f6f2).at(X(11.2), lvlY[lvl] + 0.85, Z(2.8)), box(0.12, 0.8, 0.12, 0xc4c8cc).at(X(11.2), lvlY[lvl] + 0.4, Z(2.8)));
+    f.add(box(0.8, 0.5, 1.7, 0xf6f6f2).at(X(12.4), lvlY[lvl] + 0.25, Z(3.6)), box(0.66, 0.08, 1.56, 0xa9d8f5, { outline: false }).at(X(12.4), lvlY[lvl] + 0.5, Z(3.6)));
+    floors[lvl].inner.add(f); interior.fixtures.push(f);
   }
   // Estrich + Dielen: je Geschoss als Footprint-Platte
   for (const lvl of ['kg', 'eg', 'dg']) {
@@ -599,6 +608,7 @@ export function buildHouse(engine) {
     });
     const nF = Math.round(clamp((sa - 0.3) / 0.7, 0, 1) * 10 + 1e-6);
     interior.fbh.forEach((f) => { f.visible = f.idx < nF && inFloor(f); });
+    interior.fixtures.forEach((f) => { f.visible = sa >= 0.8 && inFloor(f); });
     const es = P('estrich');
     interior.screed.forEach((x) => { x.visible = es > 0.02 && inFloor(x); x.scale[1] = Math.max(es, 0.01); x.pos[1] = x.baseY + 0.07 * es; });
     const bo = P('boeden');

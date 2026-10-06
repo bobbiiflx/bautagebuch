@@ -895,7 +895,230 @@ async function dach(ctx) {
   fx.remove(van);
 }
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, fenster, solar };
+// ---------- Gemeinsame Helfer für Innen-Gewerke ----------
+const makeDrum = () => {
+  const g = grp('kabeltrommel'), spin = grp('trommel');
+  for (const z of [0.3, -0.3]) spin.add(cy(0.5, 0.5, 0.06, 0xe58f00, 10).rotate(Math.PI / 2, 0, 0).at(0, 0, z));
+  spin.add(cy(0.28, 0.28, 0.56, 0x2b2e34, 8).rotate(Math.PI / 2, 0, 0));
+  g.add(spin); g.spin = spin;
+  return g;
+};
+const makeToolbox = (c = 0xe0553f) => { const g = grp('werkzeugkiste'); g.add(bx(0.5, 0.28, 0.3, c).at(0, 0, 0), bx(0.3, 0.06, 0.06, 0x35383e).at(0, 0.18, 0)); return g; };
+// Handwerker steigen aus dem Transporter und gehen zur Haustür; Rückgabe der Figuren (unsichtbar nach dem Betreten)
+async function crewArrive(ctx, T, outside, { van: vc = [0xf4f1ea, 0xf2a900], looks = [LOOKS.bau, LOOKS.bauin], carry = null } = {}) {
+  const { engine } = ctx;
+  const { S, mk, walkTo, driveTo, wait, tw } = T;
+  engine.flyTo({ az: 0.2, el: 0.3, r: 36, target: [0, 1.5, 11] }, S(1400));
+  const van = makeVan(vc[0], vc[1]); van.at(-12, STREET_Y, 15.4); outside.add(van);
+  await driveTo(van, [4.5, STREET_Y, 15.4], 3000, ease.out, false);
+  const c1 = mk(looks[0], 6.3, STREET_Y, 14.0, outside), c2 = mk(looks[1], 7.2, STREET_Y, 14.4, outside);
+  const doorX = X12();
+  let item = null;
+  if (carry) { item = carry(); c2.hold.add(item); item.at(0.1, 0.1, 0); }
+  return { van, c1, c2, doorX, enter: async (extra) => {
+    const jobs = [walkTo(c1, [doorX, null, 9.5], { speed: 2.8 }), walkTo(c2, [doorX + 0.9, null, 9.9], { speed: 2.8, carry: !!item })];
+    if (extra) jobs.push(extra());
+    await Promise.all(jobs);
+    await Promise.all([walkTo(c1, [doorX, 0.4, 6.9], { speed: 2.5 }), walkTo(c2, [doorX + 0.5, 0.4, 6.7], { speed: 2.5 })]);
+    c1.root.visible = false; c2.root.visible = false;
+  } };
+}
+
+// ---------- Elektro (B): Transporter, Kabeltrommel, Kabel wachsen, Steckdosen poppen mit Funken ----------
+async function elektro(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  const crew = await crewArrive(ctx, T, outside, { carry: () => makeToolbox() });
+  const drum = makeDrum(); outside.add(drum);
+  const dFrom = [crew.van.pos[0] - 1.2, terrainY(13.6) + 0.5, 13.6], dTo = [crew.doorX, 0.5, 8.0];
+  drum.at(...dFrom);
+  const roll = async () => {
+    const dx = dTo[0] - dFrom[0], dz = dTo[2] - dFrom[2], dist = Math.hypot(dx, dz);
+    drum.rot[1] = Math.atan2(-dz, dx) + Math.PI / 2;
+    await tw(dist / 2.4 * 1000, (t) => { drum.pos[0] = lerp(dFrom[0], dTo[0], t); drum.pos[2] = lerp(dFrom[2], dTo[2], t); drum.pos[1] = terrainY(drum.pos[2]) + 0.5; drum.spin.rot[2] -= dist / 0.5 / 60; });
+  };
+  await crew.enter(roll);
+  outside.visible = false;
+
+  const shown = new Set();
+  const fixView = () => { itn.sockets.forEach((n) => { n.visible = shown.has(n); }); itn.cables.forEach((n) => { n.visible = shown.has(n); }); };
+  const E1 = mk(LOOKS.bau, 0, 0, 0), E2 = mk(LOOKS.bauin, 0, 0, 0);
+  E1.root.visible = false; E2.root.visible = false;
+  const Ls = [14.2, 7.6, 13.4], axes = [0, 2, 2];
+  const levels = [['kg', DIM.kgY, 'kg', -1.8], ['eg', DIM.egY, 'eg', 0.6], ['dg', DIM.dgY, 'dg', 3.2]];
+  for (const [lvl, y0, floor, ty] of levels) {
+    house.setView('innen', floor); fixView();
+    engine.flyTo({ az: 0.55, el: 1.0, r: 22, target: [-0.5, ty, 2.5] }, S(1300));
+    const cabs = itn.cables.filter((c) => c.lvl === lvl), socks = itn.sockets.filter((c) => c.lvl === lvl);
+    // Position der Figuren: E1 bei der Trommel (Kabelanfang), E2 geht zu den Steckdosen
+    E1.root.visible = true; E2.root.visible = true;
+    E1.root.pos = [-5.5, y0, 6.0]; E2.root.pos = [-4.5, y0, 5.6];
+    setPose(E1, POSES.carry);
+    const dr = makeDrum(); fx.add(dr);
+    const laying = (async () => {
+      for (let i = 0; i < cabs.length; i++) {
+        const c = cabs[i], L = Ls[i], ax = axes[i];
+        const anchor = c.pos[ax] + L / 2, base = [...c.pos], dirv = ax === 0 ? [-1, 0] : [0, -1];
+        const startPt = [c.pos[0], c.pos[2]]; startPt[ax === 0 ? 0 : 1] = anchor;
+        dr.at(startPt[0], y0 + 0.5, startPt[1]); dr.rot[1] = ax === 0 ? 0 : Math.PI / 2;
+        // Figur geht zum Kabelanfang
+        await walkTo(E1, [startPt[0] - dirv[0] * 0.2 + (ax === 0 ? 0 : 0.9), y0, startPt[1] + (ax === 0 ? 0.9 : 0)], { speed: 3.2 });
+        c.visible = true; shown.add(c);
+        faceDir(E1.root, dirv[0], dirv[1]);
+        await tw(L / 8.5 * 1000, (t) => {
+          c.scale[ax] = Math.max(t, 0.001); c.pos[ax] = anchor - t * L / 2;
+          const head = anchor - t * L;
+          E1.root.pos[ax === 0 ? 0 : 2] = head + (ax === 0 ? 0 : 0);
+          E1.root.pos[ax === 0 ? 2 : 0] = startPt[ax === 0 ? 1 : 0] + 0.9;
+          dr.spin.rot[2] += 0.25; setPose(E1, walkPose(t * L * 2.2, 1));
+        });
+        c.scale[ax] = 1; c.pos = base;
+      }
+      setPose(E1, POSES.thumbs);
+    })();
+    const popping = (async () => {
+      for (const n of socks) {
+        const x = n.pos[0], z = n.pos[2], cdx = -0.5 - x, cdz = 1.5 - z, d = Math.hypot(cdx, cdz) || 1;
+        await walkTo(E2, [x + cdx / d * 1.0, y0, z + cdz / d * 1.0], { speed: 3.4 });
+        faceDir(E2.root, -cdx, -cdz); setPose(E2, POSES.point);
+        await wait(150);
+        n.visible = true; shown.add(n);
+        burst([x, n.pos[1] + 0.1, z], 8, 0x9fd8ff, 3, 450);
+        burst([x, n.pos[1] + 0.1, z], 5, 0xffe36e, 3.5, 350);
+        await tw(380, (t) => { n.size(1 + Math.sin(t * Math.PI) * 0.9); }); n.size(1);
+      }
+      setPose(E2, POSES.thumbs);
+    })();
+    await Promise.all([laying, popping]);
+    fx.remove(dr);
+    await wait(400);
+  }
+  E1.root.visible = false; E2.root.visible = false;
+
+  // Finale: Strom an, alle Fenster leuchten
+  house.setView('aussen');
+  outside.visible = true; crew.van.visible = true; crew.c1.root.visible = true; crew.c2.root.visible = true; drum.visible = false;
+  crew.c1.root.pos = [crew.doorX, 0.4, 6.9]; crew.c2.root.pos = [crew.doorX + 0.5, 0.4, 6.7];
+  engine.flyTo({ az: 0.35, el: 0.3, r: 34, target: [0, 2.5, 8] }, S(1400));
+  await Promise.all([walkTo(crew.c1, [crew.doorX, 0.4, 9.8], { speed: 2.4 }), walkTo(crew.c2, [crew.doorX + 1.0, 0.4, 10.0], { speed: 2.4 })]);
+  faceDir(crew.c1.root, 0, 1); faceDir(crew.c2.root, 0, 1);
+  house.setLit(false); await wait(500);
+  house.setLit(true); burst([crew.doorX, 3.5, 7], 18, 0xffe08a, 4, 900, 0.1);
+  await Promise.all([wait(800), tw(1300, (t) => { setPose(crew.c1, POSES.wave(t * 3)); setPose(crew.c2, POSES.thumbs); })]);
+  house.setLit(null);
+  outside.remove(crew.c1.root); outside.remove(crew.c2.root);
+  await Promise.all([walkTo(crew.c1, [4.5, null, 14.4], { speed: 2.6 }).catch(() => {})]);
+  await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+
+// ---------- Sanitär (A) inkl. Fußbodenheizung ----------
+async function sanitaer(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  const crew = await crewArrive(ctx, T, outside, { van: [0xf4f1ea, 0x2f7be0], looks: [LOOKS.profi, LOOKS.bau], carry: () => { const g = grp('rohre'); g.add(bx(0.9, 0.08, 0.08, 0x3f93ea).at(0, 0, 0.1), bx(0.9, 0.08, 0.08, 0xea4d3f).at(0, 0.1, -0.1)); return g; } });
+  await crew.enter();
+  outside.visible = false;
+
+  const shown = new Set();
+  const stackPipes = itn.pipes.filter((p) => !p.flat), flatPipes = itn.pipes.filter((p) => p.flat);
+  const fixView = () => {
+    itn.pipes.forEach((p) => { p.visible = shown.has(p); });
+    itn.fbh.forEach((f) => { f.visible = shown.has(f); });
+    itn.fixtures.forEach((f) => { f.visible = shown.has(f); });
+  };
+  const P1 = mk(LOOKS.profi, 0, 0, 0), P2 = mk(LOOKS.bau, 0, 0, 0);
+  const stackX = stackPipes[0].pos[0], stackZ = stackPipes[0].pos[2];
+  const drops = async (n = 14, color = 0x6fb8ff) => {
+    const bits = [];
+    for (let i = 0; i < n; i++) { const b = sp(0.1, color, { outline: false, emissive: 1, unlit: true }); b.at(stackX + (i % 2) * 0.28, DIM.dgY + 2.3, stackZ); fx.add(b); bits.push(b); }
+    await tw(1500, (t) => bits.forEach((b, i) => { const k = Math.max(0, Math.min(1, t * 1.6 - i * 0.05)); b.pos[1] = lerp(DIM.dgY + 2.3, DIM.kgY + 0.1, k); b.visible = k > 0 && k < 1; }));
+    bits.forEach((b) => fx.remove(b));
+  };
+
+  // 1) Steigleitung wächst durch alle Geschosse
+  house.setView('innen', 'dg'); fixView();
+  engine.flyTo({ az: 0.6, el: 0.75, r: 17, target: [stackX, 1.0, stackZ] }, S(1400));
+  P1.root.visible = true; P2.root.visible = true;
+  P1.root.pos = [stackX + 1.0, DIM.kgY, stackZ + 0.8]; P2.root.pos = [stackX + 1.0, DIM.egY, stackZ + 0.8];
+  faceDir(P1.root, -1, -0.5); faceDir(P2.root, -1, -0.5);
+  stackPipes.forEach((p) => { p.visible = true; shown.add(p); });
+  const flows = [];
+  await tw(4200, (t) => {
+    for (const p of stackPipes) { const h = Math.max(p.total * t, 0.001); p.scale[1] = h / p.total; p.pos[1] = p.baseY + h / 2; }
+    P1.root.pos[1] = DIM.kgY + Math.min(0.9 * t, 0.9) * 0; setPose(P1, POSES.push); setPose(P2, POSES.push);
+    if (Math.random() < 0.3) burst([stackX, DIM.kgY + stackPipes[0].total * t, stackZ], 2, 0xffe9a0, 1.5, 300);
+  });
+  await Promise.all([drops(14, 0x6fb8ff), wait(300)]);
+  burst([stackX, DIM.egY + 1.2, stackZ], 14, 0x6fb8ff, 3, 700);
+
+  // 2) Fußbodenheizung + Hauptleitung je Geschoss (Schlangenlinie)
+  const lvls = [['kg', DIM.kgY, -1.8, 1.6], ['eg', DIM.egY, 0.6, 1.0], ['dg', DIM.dgY, 3.2, 0.5]];
+  for (const [lvl, y0, ty, rate] of lvls) {
+    house.setView('innen', lvl); fixView();
+    engine.flyTo({ az: 0.55, el: 1.0, r: 21, target: [-0.5, ty, 2.5] }, S(1200));
+    P1.root.pos = [-5, y0, 0.2]; P2.root.pos = [stackX + 1, y0, stackZ + 1];
+    const hp = flatPipes.find((p) => p.lvl === lvl);
+    hp.visible = true; shown.add(hp);
+    const segs = itn.fbh.filter((f) => f.lvl === lvl).sort((a, b) => a.idx - b.idx);
+    const hpBase = hp.scale[0];
+    hp.scale[0] = 0.001; hp.pos[0] = stackX + 0;
+    const hpC = hp.pos[0];
+    await tw(500, () => {});
+    for (let i = 0; i < segs.length; i++) {
+      const f = segs[i];
+      const anchorLeft = i % 2 === 0, halfL = 5.0, base = [...f.pos];
+      f.visible = true; shown.add(f);
+      const ms = 10 / (9 * rate) * 1000;
+      faceDir(P1.root, anchorLeft ? -1 : 1, 0);
+      await tw(ms, (t) => {
+        f.scale[0] = Math.max(t, 0.001); f.pos[0] = base[0] + (anchorLeft ? halfL : -halfL) * (1 - t) * -1 + (anchorLeft ? 0 : 0);
+        // wächst von einem Ende: Mitte verschiebt sich
+        f.pos[0] = (anchorLeft ? base[0] + halfL - t * halfL : base[0] - halfL + t * halfL);
+        const head = anchorLeft ? base[0] + halfL - t * 10 : base[0] - halfL + t * 10;
+        P1.root.pos[0] = head; P1.root.pos[2] = f.pos[2] + 0.5; P1.root.pos[1] = y0;
+        setPose(P1, { ...POSES.push, lean: 0.35 });
+      });
+      f.scale[0] = 1; f.pos = base;
+    }
+    hp.scale[0] = hpBase; hp.pos[0] = hpC;
+    setPose(P1, POSES.thumbs);
+    burst([stackX, y0 + 0.4, stackZ], 10, 0xffb347, 2.5, 500);
+    await drops(8, lvl === 'kg' ? 0xea4d3f : 0x6fb8ff);
+  }
+  // 3) Sanitärobjekte blinken auf
+  for (const [lvl, y0, ty] of [['eg', DIM.egY, 0.6], ['dg', DIM.dgY, 3.2]]) {
+    house.setView('innen', lvl); fixView();
+    engine.flyTo({ az: 0.45, el: 0.8, r: 15, target: [stackX - 0.5, ty + 0.5, stackZ - 0.6] }, S(1200));
+    P1.root.pos = [stackX + 2.2, y0, stackZ + 1.8]; P2.root.pos = [stackX - 1.2, y0, stackZ + 1.8];
+    faceDir(P1.root, -0.5, -1); faceDir(P2.root, 0.5, -1);
+    const f = itn.fixtures.find((x) => x.lvl === lvl);
+    f.visible = true; shown.add(f);
+    for (let k = 0; k < 4; k++) { f.visible = k % 2 === 1; await wait(170); }
+    f.visible = true;
+    burst([stackX - 1.2, y0 + 0.8, stackZ - 0.6], 12, 0xbfe6ff, 2.5, 700);
+    await tw(900, (t) => { setPose(P1, POSES.wave(t * 3)); setPose(P2, POSES.thumbs); });
+  }
+  P1.root.visible = false; P2.root.visible = false;
+  await wait(300);
+
+  // 4) Außen: Transporter fährt ab
+  house.setView('aussen');
+  outside.visible = true; crew.c1.root.visible = false; crew.c2.root.visible = false;
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  puff([crew.doorX, 1.2, 7.6], 4, 0.6);
+  await wait(600);
+  await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+
+export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
