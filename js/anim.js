@@ -1495,7 +1495,136 @@ async function maler(ctx) {
   await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
 }
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler };
+// ---------- Böden (A): Dielenstreifen stehen auf und kippen wie Dominosteine ----------
+async function boeden(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  const crew = await crewArrive(ctx, T, outside, { van: [0xf4f1ea, 0x8a5a36], looks: [LOOKS.alt, LOOKS.bau], carry: () => { const g = grp('dielen'); g.add(bx(0.9, 0.08, 0.2, 0xe2bb82).at(0, 0, 0.1), bx(0.9, 0.08, 0.2, 0xd6aa6e).at(0, 0.1, -0.1)); return g; } });
+  await crew.enter();
+  outside.visible = false;
+  const order = ['kg', 'eg', 'dg']; let curLvl = 'kg';
+  const MAXV = { kg: 8.0, eg: 6.4, dg: 8.0 };
+  const st = new Map(); // Diele -> { psi (π/2 stehend … 0 flach), vis }
+  const setup = (pl) => {
+    const v0 = pl.idx * 1.2, v1 = Math.min((pl.idx + 1) * 1.2, MAXV[pl.lvl]);
+    pl.hw = (v1 - v0) * 0.94 / 2; pl.zc = pl.pos[2];
+    st.set(pl, { psi: Math.PI / 2, vis: false, k: 1 });
+  };
+  itn.planks.forEach(setup);
+  const place = (pl) => {
+    const s = st.get(pl); if (!s) return;
+    pl.visible = s.vis && order.indexOf(pl.lvl) <= order.indexOf(curLvl);
+    const zp = pl.zc - pl.hw;
+    pl.rot[0] = -s.psi; pl.pos[1] = pl.restY + pl.hw * Math.sin(s.psi); pl.pos[2] = zp + pl.hw * Math.cos(s.psi);
+    pl.scale[1] = s.k; pl.scale[2] = s.k;
+  };
+  const fixView = () => itn.planks.forEach(place);
+  house.setProgress({ ...house.state.p, boeden: 0 });
+  const B1 = mk(LOOKS.alt, 0, 0, 0), B2 = mk(LOOKS.bau, 0, 0, 0);
+  for (const [lvl, y0, ty] of LV) {
+    curLvl = lvl; house.setView('innen', lvl); fixView();
+    engine.flyTo({ az: 0.5, el: 0.95, r: 20, target: [0.2, ty, 2.5] }, S(1200));
+    const ps = itn.planks.filter((p) => p.lvl === lvl).sort((a, b) => a.idx - b.idx);
+    B1.root.pos = [-6.5, y0, 5.6]; B2.root.pos = [6.0, y0, 5.8];
+    faceDir(B1.root, 0, -1); faceDir(B2.root, 0, -1);
+    // 1) Streifen poppen stehend auf
+    for (const pl of ps) {
+      const s = st.get(pl); s.vis = true; s.psi = Math.PI / 2; s.k = 0.05;
+      tw(260, (t) => { s.k = lerp(0.05, 1, ease.out(t)); place(pl); });
+      walkTo(B1, [-6.0, y0, pl.zc + 0.6], { speed: 3 });
+      await wait(95);
+    }
+    await wait(300);
+    // 2) Dominoeffekt: erster Streifen wird angestoßen
+    setPose(B1, POSES.point);
+    for (const pl of ps) {
+      const s = st.get(pl);
+      tw(420, (t) => { s.psi = lerp(Math.PI / 2, 0, ease.in(t)); place(pl); }).then(() => { s.psi = 0; place(pl); burst([0.2, y0 + 0.3, pl.zc], 2, 0xe8c58c, 1.5, 300); });
+      setPose(B2, { ...POSES.push, lean: 0.2 });
+      await wait(150);
+    }
+    await wait(520);
+    // 3) Glanz
+    burst([0.2, y0 + 0.4, 1.0], 18, 0xfff0c2, 3.5, 700, 0.06);
+    setPose(B1, POSES.thumbs); setPose(B2, POSES.wave(0));
+    await wait(400);
+  }
+  B1.root.visible = false; B2.root.visible = false;
+  house.setView('aussen'); outside.visible = true; crew.van.visible = true;
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  await wait(400);
+  await driveTo(crew.van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+
+// ---------- Küche (B): Möbelwagen, Packer tragen Teile, die Küche poppt auf ----------
+async function kueche(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const itn = house.parts.interior;
+  house.setView('aussen');
+  const outside = new Node(null); fx.add(outside);
+  engine.flyTo({ az: 0.2, el: 0.3, r: 36, target: [-2, 1.5, 11] }, S(1400));
+  const van = makeBoxTruck(); van.children.find((c) => c.name === 'regal').visible = false;
+  van.at(-34, STREET_Y, 15.4); outside.add(van);
+  const stopX = X12() + 4.2;
+  await driveTo(van, [stopX, STREET_Y, 15.4], 3200, ease.out, false);
+  await tw(900, (t) => { van.door.rot[1] = lerp(0, 1.9, ease.out(t)); });
+  const doorX = X12();
+  const P1 = mk(LOOKS.bau, stopX - 4.6, STREET_Y, 14.4, outside), P2 = mk(LOOKS.alt, stopX - 4.2, STREET_Y, 14.6, outside);
+  // Teile: Unterschrank, Arbeitsplatte, Oberschrank, Kühlschrank
+  const parts = [
+    () => { const g = grp('unterschrank'); g.add(bx(1.0, 0.8, 0.6, 0xf6f3ee).at(0, 0, 0)); return g; },
+    () => { const g = grp('platte'); g.add(bx(1.5, 0.08, 0.64, 0x4a4f55).at(0, 0, 0)); return g; },
+    () => { const g = grp('oberschrank'); g.add(bx(1.0, 0.6, 0.35, 0xf0d9a2).at(0, 0, 0)); return g; },
+    () => { const g = grp('kuehlschrank'); g.add(bx(0.65, 1.5, 0.65, 0xcfd4d8).at(0, 0, 0)); return g; },
+  ];
+  const kitchenAt = { eg: [0.84, 0.6, 6.5], dg: [2.44, 3.3, 2.9] };
+  const kmap = { eg: 0, dg: 0 };
+  const fixView = () => itn.kitchen.forEach((k) => { const p = kmap[k.lvl] ?? 0; k.visible = p > 0.02 && (k.lvl === curLvl || (k.lvl === 'eg' && curLvl === 'dg')); k.size(Math.max(p, 0.001)); });
+  let curLvl = 'eg';
+  house.setProgress({ ...house.state.p, kueche: 0 });
+  // 1) Packer tragen in Paaren bis zur Haustür
+  const doorIn = [doorX, 0.4, 6.9];
+  for (let i = 0; i < parts.length; i += 2) {
+    const items = [parts[i](), parts[i + 1]()];
+    P1.hold.add(items[0]); items[0].at(0.1, 0.1, 0); P2.hold.add(items[1]); items[1].at(0.1, 0.1, 0);
+    await Promise.all([walkTo(P1, [doorX, null, 9.5], { speed: 2.6, carry: true }), walkTo(P2, [doorX + 0.9, null, 9.9], { speed: 2.6, carry: true })]);
+    await Promise.all([walkTo(P1, doorIn, { speed: 2.5, carry: true }), walkTo(P2, [doorX + 0.5, 0.4, 6.7], { speed: 2.5, carry: true })]);
+    P1.hold.remove(items[0]); P2.hold.remove(items[1]);
+    if (i + 2 < parts.length) await Promise.all([walkTo(P1, [stopX - 4.6, null, 14.4], { speed: 3.4 }), walkTo(P2, [stopX - 4.2, null, 14.6], { speed: 3.4 })]);
+  }
+  P1.root.visible = false; P2.root.visible = false;
+  await tw(700, (t) => { van.door.rot[1] = lerp(1.9, 0, t); });
+  outside.visible = false;
+  // 2) Innen: Küche poppt auf (EG, dann DG)
+  const I1 = mk(LOOKS.bau, 0, 0, 0), I2 = mk(LOOKS.alt, 0, 0, 0);
+  for (const lvl of ['eg', 'dg']) {
+    curLvl = lvl; house.setView('innen', lvl); fixView();
+    const [kx, y0, kz] = kitchenAt[lvl];
+    engine.flyTo({ az: 0.5, el: 0.95, r: 17, target: [kx, y0 + 0.5, kz] }, S(1300));
+    I1.root.pos = [doorX + 1.5, y0, 6.0]; I2.root.pos = [doorX + 2.4, y0, 6.2];
+    const it1 = parts[0](), it2 = parts[3](); I1.hold.add(it1); it1.at(0.1, 0.1, 0); I2.hold.add(it2); it2.at(0.1, 0.1, 0);
+    await Promise.all([walkTo(I1, [kx + 1.2, y0, kz + 1.0], { speed: 2.8, carry: true }), walkTo(I2, [kx - 1.6, y0, kz + 1.0], { speed: 2.8, carry: true })]);
+    I1.hold.remove(it1); I2.hold.remove(it2);
+    faceDir(I1.root, 0, -1); faceDir(I2.root, 0, -1);
+    burst([kx, y0 + 1.0, kz], 20, 0xffe9a0, 4, 800, 0.1);
+    await tw(900, (t) => { const e = t < 0.7 ? ease.out(t / 0.7) * 1.15 : lerp(1.15, 1, (t - 0.7) / 0.3); kmap[lvl] = e; fixView(); setPose(I1, POSES.wave(t * 3)); setPose(I2, POSES.thumbs); });
+    kmap[lvl] = 1; fixView();
+    await wait(450);
+  }
+  I1.root.visible = false; I2.root.visible = false;
+  house.setView('aussen'); outside.visible = true; van.visible = true;
+  engine.flyTo({ az: 0.3, el: 0.32, r: 34, target: [0, 2, 9] }, S(1300));
+  await wait(400);
+  await driveTo(van, [40, STREET_Y, 15.4], 2600, ease.in, false);
+}
+
+export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler, boeden, kueche };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
