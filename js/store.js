@@ -137,7 +137,7 @@ export async function remove(type, id) {
   if (type === 'documents' && prev.data.path) {
     // verlinkte Dokumente teilen sich eine Datei: erst löschen, wenn niemand sie mehr braucht
     const shared = [...records.entries()].some(([k, r]) => k !== key && k.startsWith('documents/') && !r.deleted && r.data?.path === prev.data.path);
-    if (!shared) await deleteBlob(prev.data.path);
+    if (!shared) { await deleteBlob(prev.data.path); if (prev.data.preview) await deleteBlob(prev.data.preview); }
   }
   setState({});
   schedulePush();
@@ -236,6 +236,13 @@ export async function addDocumentFile(file, category, id) {
   return { path, size: blob.size, mime: blob.type || file.type || 'application/octet-stream', fileName: name };
 }
 export const replaceDocumentFilePath = deleteBlob;
+// PNG-Vorschau (erste Seite) eines PDF-Dokuments ablegen; gibt den Pfad zurück
+export async function putDocPreview(d, png) {
+  const path = d.path + '.seite1.png';
+  await putBlobLocal(path, png);
+  schedulePush();
+  return path;
+}
 
 // Prüfsumme einer Datei, um doppelte Uploads zu erkennen
 export async function fileHash(blob) {
@@ -469,7 +476,7 @@ export function referencedBlobs() {
       for (const r of x.sketches || []) { out.add(sketchPaths(r).json); out.add(sketchPaths(r).png); }
     }
   }
-  for (const d of all('documents')) if (d.path) out.add(d.path);
+  for (const d of all('documents')) { if (d.path) out.add(d.path); if (d.preview) out.add(d.preview); }
   return [...out];
 }
 export async function getBlobData(path) {

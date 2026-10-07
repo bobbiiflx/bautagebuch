@@ -12,6 +12,7 @@ import { makeBackup, readBackup } from './backup.js';
 import { DEFAULT_DOC_RULES, suggest } from './docrules.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
+import { pdfToPng } from './pdfimg.js';
 import { imagesToPdf } from './pdf.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import * as Fin from './finance.js';
@@ -1169,6 +1170,20 @@ function docIcon(mime = '') {
 }
 
 // Dokument in der App ansehen (statt roher Browser-Adresse): Titel, Speicherort, Teilen, Herunterladen
+// PDF → PNG der ersten Seite (einmalig, wird beim Dokument gespeichert; Original-PDF bleibt unverändert)
+async function ensurePreview(d, quiet = false) {
+  if (d.virtual || d.preview || !(d.mime || '').includes('pdf')) return d;
+  try {
+    const blob = await Store.getBlobData(d.path);
+    if (!blob) return d;
+    if (!quiet) toast('Vorschau wird erstellt …', 2500);
+    const { blob: png, pages } = await pdfToPng(blob);
+    const path = await Store.putDocPreview(d, png);
+    const cur = Store.get('documents', d.id) || d;
+    return await Store.save('documents', { ...cur, preview: path, pages: cur.pages || pages });
+  } catch (e) { console.warn('PDF-Vorschau nicht möglich:', e); return d; }
+}
+
 async function openDoc(d) {
   let url;
   try {
@@ -1192,20 +1207,22 @@ async function openDoc(d) {
     } catch (e) { if (e?.name !== 'AbortError') toast('Teilen nicht möglich – bitte „Herunterladen“ nutzen.'); }
   };
   const pdfInfo = h('div', { class: 'dv-pg muted small' });
-  const pdfBox = mime.includes('pdf') ? h('div', { class: 'dv-page' }) : null;
-  const isImg = mime.startsWith('image/');
+  const viewPath = mime.includes('pdf') && d.preview ? d.preview : null; // PNG-Seite 1 statt PDF-Rahmen
+  const baseUrl = viewPath ? await Store.blobURL(viewPath).catch(() => null) : null;
+  const pdfBox = mime.includes('pdf') && !baseUrl ? h('div', { class: 'dv-page' }) : null;
+  const isImg = mime.startsWith('image/') || (!!viewPath && !!baseUrl);
   const mark0 = d.sketches?.[0];
-  const imgEl = h('img', { class: 'dv-img', src: url, alt: d.name });
+  const imgEl = h('img', { class: 'dv-img', src: baseUrl || url, alt: d.name });
   let marked = !!mark0;
   const showMark = async () => {
     if (!isImg || !mark0) return;
-    const u = marked ? await Store.blobURL(Store.sketchPaths(mark0).png).catch(() => null) : url;
+    const u = marked ? await Store.blobURL(Store.sketchPaths(mark0).png).catch(() => null) : (baseUrl || url);
     if (u) imgEl.src = u;
     togBtn?.replaceChildren(icon(marked ? 'visibility' : 'draw', { size: 18 }), marked ? ' Original' : ' Markiert');
   };
   const togBtn = isImg && mark0 ? h('button', { type: 'button', class: 'btn small', onclick: () => { marked = !marked; showMark(); } }) : null;
   const annotate = async () => {
-    const n = await openInk({ ref: mark0 || null, docBg: { path: d.path, label: d.name } });
+    const n = await openInk({ ref: mark0 || null, docBg: { path: viewPath || d.path, label: d.name } });
     if (!n || (mark0 && n.v === mark0.v)) return;
     const cur = Store.get('documents', d.id) || d;
     await Store.save('documents', { ...cur, sketches: [n] });
@@ -1225,11 +1242,15 @@ async function openDoc(d) {
       navigator.canShare ? h('button', { type: 'button', class: 'btn small', onclick: share }, 'Teilen') : null,
       h('button', { type: 'button', class: 'btn small', onclick: download }, 'Herunterladen'),
       mime.includes('pdf') ? h('button', { type: 'button', class: 'btn small', onclick: () => window.open(url, '_blank') }, 'Vollbild') : null),
-    h('div', { class: 'dv-body' }, body), ...(pdfBox ? [pdfInfo] : []));
+    h('div', { class: 'dv-body' }, body), ...(pdfBox ? [pdfInfo] : viewPath && d.pages > 1 ? [h('div', { class: 'dv-pg muted small' }, `Seite 1 von ${d.pages} – alle Seiten siehst du mit „Vollbild“.`)] : []));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
-  if (pdfBox) fitPdfFirstPage(dlg, pdfBox, pdfInfo, url, d);
+  if (pdfBox) {
+    fitPdfFirstPage(dlg, pdfBox, pdfInfo, url, d);
+    // PNG der ersten Seite im Hintergrund erzeugen und die Ansicht dann damit ersetzen
+    if (!d.virtual && !d.preview) ensurePreview(d, true).then((nd) => { if (nd.preview && dlg.isConnected && dlg.open) { close(); openDoc(nd); } });
+  }
   showMark();
 }
 
@@ -1360,11 +1381,12 @@ function docAddForm({ files = [], mode = 'upload' } = {}) {
       let info = null;
       const twin = await Store.findDuplicate(hash, out);
       if (twin) {
-        if (await askConfirm(`Diese Datei gibt es schon als „${twin.name}“. Statt sie noch einmal hochzuladen mit dem vorhandenen Dokument verlinken?`, 'Verlinken')) info = { path: twin.path, size: twin.size, mime: twin.mime, fileName: twin.fileName, linked: true };
+        if (await askConfirm(`Diese Datei gibt es schon als „${twin.name}“. Statt sie noch einmal hochzuladen mit dem vorhandenen Dokument verlinken?`, 'Verlinken')) info = { path: twin.path, size: twin.size, mime: twin.mime, fileName: twin.fileName, preview: twin.preview, linked: true };
         else if (!(await askConfirm('Die Datei wird dann doppelt gespeichert. Trotzdem?', 'Doppelt speichern'))) return false;
       }
       if (!info) info = await Store.addDocumentFile(out, f.cat.value, id);
-      await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, hash, ...info });
+      const saved = await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, hash, ...info });
+      ensurePreview(saved, true); // im Hintergrund: PNG der ersten PDF-Seite
     },
     onCancel: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   });
