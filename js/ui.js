@@ -7,6 +7,7 @@ import { CONFIG } from './config.js';
 import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
+import * as Wx from './weather.js';
 import { donut, stackBar, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
@@ -323,9 +324,27 @@ function diaryForm(entry) {
   const phase = phaseSelect(e.phaseId);
   const who = h('input', { type: 'text', placeholder: 'Firma / Handwerker', value: e.who || '' });
   const pf = photoField(e.photos);
-  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Wer war da?', who), pf.el], {
+  // Wetter automatisch zum Datum (Ort aus den Einstellungen), bleibt am Eintrag gespeichert
+  let wx = e.weather || null;
+  const loc = Store.get('settings', 'location');
+  const wxBox = h('div', { class: 'wx' });
+  const paintWx = (msg) => wxBox.replaceChildren(
+    wx ? h('span', { class: 'wx-s' }, icon(Wx.describe(wx.code).icon, { filled: true, size: 22 }), ' ' + Wx.summary(wx)) : h('span', { class: 'muted small' }, msg || (loc ? 'Kein Wetter geladen.' : 'Ort in den Einstellungen festlegen, dann wird das Wetter automatisch eingetragen.')),
+    loc && h('button', { type: 'button', class: 'btn small', onclick: () => loadWx(true) }, icon('refresh', { size: 18 }), ' Laden'),
+    wx && h('button', { type: 'button', class: 'btn-text small', onclick: () => { wx = null; paintWx(); } }, 'Entfernen')
+  );
+  let wxFor = wx?.at || '';
+  const loadWx = async (force) => {
+    if (!loc || !date.value || (!force && wxFor === date.value)) return;
+    wxFor = date.value; paintWx('Wetter wird geladen …');
+    try { wx = await Wx.fetchWeather(loc, date.value); paintWx(); } catch (err) { wx = null; paintWx(err.message || 'Wetter nicht verfügbar.'); }
+  };
+  paintWx();
+  date.addEventListener('change', () => loadWx(false));
+  if (!entry || !e.weather) loadWx(false);
+  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Wetter', wxBox), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Wer war da?', who), pf.el], {
     onSave: async () => {
-      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), photos: pf.ids });
+      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), weather: wx, photos: pf.ids });
       await pf.commit();
     },
     onCancel: () => pf.cancel(),
@@ -345,6 +364,7 @@ function viewDiary() {
             { class: 'card entry', onclick: () => diaryForm(d) },
             h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(d.date)), d.phaseId && chip(phaseName(d.phaseId))),
             h('h3', {}, d.title),
+            d.weather && h('div', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ' ' + Wx.summary(d.weather)),
             d.text && h('p', { class: 'clamp' }, d.text),
             photoStrip(d.photos),
             h('div', { class: 'muted small' }, [d.who, d.updatedBy].filter(Boolean).join(' · '))
@@ -525,6 +545,41 @@ function viewCosts() {
       : empty('Keine Kosten', 'Trage Rechnungen, Abschläge und Angebote ein und fotografiere die Belege.'),
   ];
   return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? summary : invoices, fab(() => costForm()));
+}
+
+// ---------- Suche ----------
+let searchQ = '';
+const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss');
+function searchAll(q) {
+  const terms = norm(q).split(/\s+/).filter(Boolean);
+  if (!terms.length) return [];
+  const rows = [];
+  const add = (type, label, icn, items, texts, title, sub, open) => items.forEach((x) => {
+    const hay = norm(texts(x).filter(Boolean).join(' · '));
+    if (terms.every((t) => hay.includes(t))) rows.push({ type, label, icn, x, title: title(x), sub: sub(x), open: () => open(x), date: x.date || '' });
+  });
+  add('diary', 'Tagebuch', 'menu_book', Store.all('diary'), (x) => [x.title, x.text, x.who, phaseName(x.phaseId)], (x) => x.title, (x) => [fmtDate(x.date), x.who].filter(Boolean).join(' · '), diaryForm);
+  add('costs', 'Kosten', 'payments', Store.all('costs'), (x) => [x.title, x.vendor, x.note, phaseName(x.phaseId)], (x) => `${x.title} · ${fmtEUR(x.amount)}`, (x) => [x.vendor, phaseName(x.phaseId), fmtDate(x.date)].filter(Boolean).join(' · '), costForm);
+  add('defects', 'Mängel', 'warning', Store.all('defects'), (x) => [x.title, x.description, x.room, phaseName(x.phaseId)], (x) => x.title, (x) => [x.room, phaseName(x.phaseId)].filter(Boolean).join(' · '), defectForm);
+  add('todos', 'Aufgaben', 'task_alt', Store.all('todos'), (x) => [x.title, x.note, x.assignee, phaseName(x.phaseId)], (x) => x.title, (x) => [x.done ? 'erledigt' : 'offen', phaseName(x.phaseId)].filter(Boolean).join(' · '), todoForm);
+  add('documents', 'Dokumente', 'folder', Store.all('documents'), (x) => [x.name, x.category, x.note, phaseName(x.phaseId)], (x) => x.name, (x) => [x.category, phaseName(x.phaseId)].filter(Boolean).join(' · '), docEditForm);
+  add('phases', 'Planung', 'calendar_month', phases(), (x) => [x.name, x.note], (x) => x.name, (x) => x.progress + ' %', phaseForm);
+  return rows.sort((a, b) => b.date.localeCompare(a.date));
+}
+function viewSearch() {
+  const out = h('div', { class: 'view-inner' });
+  const input = h('input', { type: 'search', placeholder: 'Suchen in Tagebuch, Kosten, Mängeln …', value: searchQ, enterkeyhint: 'search', 'aria-label': 'Suche' });
+  const paint = () => {
+    searchQ = input.value;
+    const rows = searchAll(searchQ);
+    if (!searchQ.trim()) return out.replaceChildren(empty('Alles durchsuchen', 'Tippe einen Begriff – gesucht wird in Tagebuch, Kosten, Mängeln, Aufgaben, Dokumenten und Planung.'));
+    if (!rows.length) return out.replaceChildren(empty('Nichts gefunden', 'Probiere einen anderen Begriff.'));
+    out.replaceChildren(h('p', { class: 'muted small' }, `${rows.length} Treffer`), h('div', { class: 'card' }, rows.slice(0, 80).map((r) => h('div', { class: 'hit', onclick: r.open }, icon(r.icn, { size: 22 }), h('div', { class: 'hit-t' }, h('div', {}, r.title), h('div', { class: 'muted small' }, [r.label, r.sub].filter(Boolean).join(' · ')))))));
+  };
+  input.addEventListener('input', paint);
+  paint();
+  if (!searchQ) setTimeout(() => { if (route() === 'suche') input.focus(); }, 50);
+  return h('div', { class: 'view' }, input, out);
 }
 
 // ---------- Ansicht: Mängel ----------
@@ -862,6 +917,26 @@ function download(name, text, type = 'application/json') {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
+function locBox() {
+  const cur = Store.get('settings', 'location');
+  const q = h('input', { type: 'search', placeholder: 'Ort oder PLZ, z. B. 80331 München', value: '', enterkeyhint: 'search' });
+  const res = h('div', { class: 'res' });
+  const go_ = async () => {
+    if (!q.value.trim()) return;
+    res.replaceChildren(h('p', { class: 'muted small' }, 'Suche …'));
+    try {
+      const list = await Wx.searchPlaces(q.value.trim());
+      res.replaceChildren(...(list.length ? list.map((p) => h('button', { class: 'btn block', onclick: async () => { await Store.save('settings', { id: 'location', name: p.name, lat: p.lat, lon: p.lon }); toast('Ort gespeichert.'); } }, icon('location_on', { size: 18 }), ' ' + p.name)) : [h('p', { class: 'muted small' }, 'Nichts gefunden.')]));
+    } catch (e) { res.replaceChildren(h('p', { class: 'muted small' }, e.message || 'Suche fehlgeschlagen.')); }
+  };
+  q.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go_(); } });
+  return [
+    cur ? h('p', { class: 'signed' }, icon('location_on', { filled: true, size: 20 }), ' ', h('strong', {}, cur.name)) : h('p', { class: 'muted small' }, 'Noch kein Ort festgelegt. Damit trägt das Tagebuch das Wetter zum Datum automatisch ein.'),
+    h('div', { class: 'quickadd' }, q, h('button', { class: 'btn', onclick: go_ }, 'Suchen')),
+    res,
+  ];
+}
+
 function viewSettings() {
   const st = Store.getState();
   const signed = Auth.isSignedIn();
@@ -904,6 +979,7 @@ function viewSettings() {
     { class: 'view' },
     card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
+    card('Standort für das Wetter', locBox()),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
     card('Eigene Gewerke',
       customTrades().length ? customTrades().map((t) => h('div', { class: 'line', onclick: () => tradeForm(t) }, h('span', {}, t.name), h('span', { class: 'muted small' }, 'bearbeiten'))) : h('p', { class: 'muted small' }, 'Material, Architektur und Planung sowie Werkzeug gibt es schon. Hier kannst du weitere Gewerke oder Verwendungen anlegen.'),
@@ -948,6 +1024,7 @@ const ROUTES = {
   aufgaben: ['Aufgaben', viewTodos],
   planung: ['Planung', viewPlan],
   dokumente: ['Dokumente', viewDocs],
+  suche: ['Suche', viewSearch],
   einstellungen: ['Einstellungen', viewSettings],
   haus: ['3D-Haus', () => hausView(phases())],
 };
@@ -1005,7 +1082,7 @@ export function mount(el) {
   headerSync = h('button', { class: 'sync-btn', 'aria-label': 'Synchronisierung', onclick: () => go('einstellungen') });
   mainEl = h('main', {});
   menuBtn = h('button', { class: 'icon-btn', 'aria-label': 'Menü öffnen', 'aria-haspopup': 'dialog', onclick: openMenu }, icon('menu', { size: 26 }));
-  root.append(h('header', { class: 'topbar' }, menuBtn, h('h1', { class: 'title' }, 'Bautagebuch'), headerSync), mainEl);
+  root.append(h('header', { class: 'topbar' }, menuBtn, h('h1', { class: 'title' }, 'Bautagebuch'), h('button', { class: 'icon-btn', 'aria-label': 'Suche', onclick: () => go('suche') }, icon('search', { size: 24 })), headerSync), mainEl);
   const onNav = () => { const r = readHash(); if (r !== current) { current = r; window.scrollTo(0, 0); render(); } };
   addEventListener('hashchange', onNav);
   addEventListener('popstate', onNav);
