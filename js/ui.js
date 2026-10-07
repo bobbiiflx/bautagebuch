@@ -1164,7 +1164,6 @@ function viewPlan() {
 }
 
 // ---------- Ansicht: Dokumente ----------
-let docFilter = '';  // '', '__pin' oder Kategorie/Gewerk/Tag
 function docIcon(mime = '') {
   return icon(mime.includes('pdf') ? 'picture_as_pdf' : mime.startsWith('image/') ? 'image' : mime.includes('sheet') || mime.includes('excel') ? 'table_chart' : mime.includes('word') ? 'description' : 'attach_file', { size: 28 });
 }
@@ -1321,35 +1320,44 @@ function docEditForm(d) {
   });
 }
 
-const docMatches = (d, f) => !f || (f === '__pin' ? !!d.pinned : docCat(d) === f || (d.phaseId && phaseName(d.phaseId) === f) || (d.tags || []).includes(f));
+// Filterleiste der Dokumente: Kategorie, Gewerk, Tag und Angepinnt – kombinierbar
+const docF = { cat: '', phase: '', tag: '', pin: false };
+const selPill = (ic, value, options, onch, any) => h('label', { class: 'pillsel' + (value ? ' on' : '') }, icon(ic, { size: 18 }), h('select', { value, onchange: (e) => onch(e.target.value), 'aria-label': any }, h('option', { value: '' }, any), options.map(([v, t]) => h('option', { value: v, selected: v === value }, t))));
+const docMatches = (d, f) => (!f.cat || docCat(d) === f.cat) && (!f.phase || d.phaseId === f.phase) && (!f.tag || (d.tags || []).includes(f.tag)) && (!f.pin || d.pinned);
 
 function viewDocs() {
   const all = Store.all('documents').sort(byDateDesc);
-  const list = all.filter((d) => docMatches(d, docFilter));
+  const list = all.filter((d) => docMatches(d, docF));
   const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
-  const toggleF = (v) => { docFilter = docFilter === v ? '' : v; render(); };
-  const pill = (v, t, ic) => h('button', { class: 'pill' + (docFilter === v ? ' on' : ''), onclick: () => toggleF(v) }, ic && icon(ic, { size: 16, filled: true }), ic ? ' ' : '', t);
-  const known = new Set(['', '__pin', ...DOC_CATEGORIES]);
+  const set = (patch) => { Object.assign(docF, patch); render(); };
+  const active = docF.cat || docF.phase || docF.tag || docF.pin;
+  const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
   const row = (d) => {
-    const chips = [h('button', { type: 'button', class: 'tchip plain', onclick: () => toggleF(docCat(d)) }, docCat(d)),
-      d.phaseId && h('button', { type: 'button', class: 'tchip', style: { '--pc': phaseColor(d.phaseId) }, onclick: () => toggleF(phaseName(d.phaseId)) }, phaseName(d.phaseId)),
-      ...(d.tags || []).map((t) => h('button', { type: 'button', class: 'tchip plain', onclick: () => toggleF(t) }, '#' + t))].filter(Boolean);
-    return h('div', { class: 'doc' + (d.pinned ? ' pinned' : '') },
-      h('div', { class: 'doc-i', onclick: () => openDoc(d) }, docIcon(d.mime)),
-      h('div', { class: 'doc-t' }, h('div', { onclick: () => openDoc(d) }, d.name), h('div', { class: 'dc-chips' }, chips), h('div', { class: 'muted small' }, [fmtDate(d.date), fmtSize(d.size || 0)].filter(Boolean).join(' · '))),
-      h('button', { class: 'mv pinbtn' + (d.pinned ? ' on' : ''), 'aria-label': d.pinned ? 'Nicht mehr anpinnen' : 'Anpinnen', 'aria-pressed': String(!!d.pinned), onclick: () => Store.save('documents', { ...d, pinned: !d.pinned }) }, icon('push_pin', { size: 22, filled: !!d.pinned })),
-      h('button', { class: 'mv', 'aria-label': 'Details', onclick: () => docEditForm(d) }, icon('edit', { size: 22 })));
+    const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
+      d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
+      ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t))].filter(Boolean);
+    const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
+    return h('div', { class: 'doc' + (d.pinned ? ' pinned' : ''), role: 'button', tabindex: 0, onclick: () => openDoc(d), onkeydown: (e) => { if (e.key === 'Enter') openDoc(d); } },
+      h('div', { class: 'doc-i' }, docIcon(d.mime)),
+      h('div', { class: 'doc-t' }, h('div', {}, d.name), h('div', { class: 'dc-chips' }, chips), h('div', { class: 'muted small' }, [fmtDate(d.date), fmtSize(d.size || 0)].filter(Boolean).join(' · '))),
+      h('button', { class: 'mv pinbtn' + (d.pinned ? ' on' : ''), 'aria-label': d.pinned ? 'Nicht mehr anpinnen' : 'Anpinnen', 'aria-pressed': String(!!d.pinned), onclick: stop(() => Store.save('documents', { ...d, pinned: !d.pinned })) }, icon('push_pin', { size: 22, filled: !!d.pinned })),
+      h('button', { class: 'mv', 'aria-label': 'Bearbeiten', onclick: stop(() => docEditForm(d)) }, icon('edit', { size: 22 })));
   };
   return h(
     'div',
     { class: 'view' },
-    h('div', { class: 'pills wrap' }, pill('', 'Alle'), all.some((d) => d.pinned) && pill('__pin', 'Angepinnt', 'push_pin'), DOC_CATEGORIES.map((c) => pill(c, c)), !known.has(docFilter) && pill(docFilter, docFilter + ' ×')),
+    h('div', { class: 'pills dfilters' },
+      selPill('folder', docF.cat, DOC_CATEGORIES.map((c) => [c, c]), (v) => set({ cat: v }), 'Alle Kategorien'),
+      selPill('layers', docF.phase, phaseIds.map((id) => [id, phaseName(id)]), (v) => set({ phase: v }), 'Alle Gewerke'),
+      selPill('texture', docF.tag, allDocTags().filter((t) => all.some((d) => (d.tags || []).includes(t))).map((t) => [t, '#' + t]), (v) => set({ tag: v }), 'Alle Tags'),
+      h('button', { class: 'pill small' + (docF.pin ? ' on' : ''), 'aria-pressed': String(docF.pin), onclick: () => set({ pin: !docF.pin }) }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt'),
+      active ? h('button', { class: 'btn-text small', onclick: () => set({ cat: '', phase: '', tag: '', pin: false }) }, 'Zurücksetzen') : null),
     list.length
       ? [pinned.length && rest.length ? h('div', { class: 'sub' }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt') : null,
          pinned.length ? h('div', { class: 'card' }, pinned.map(row)) : null,
          pinned.length && rest.length ? h('div', { class: 'sub' }, 'Weitere') : null,
          rest.length ? h('div', { class: 'card' }, rest.map(row)) : null]
-      : empty('Keine Dokumente', docFilter ? 'Mit diesem Filter gibt es nichts. Tippe oben auf „Alle“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
+      : empty('Keine Dokumente', active ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
     h('div', { class: 'fab-pair' },
       h('button', { class: 'fab-x alt', onclick: () => pickFiles('up', (fs) => docAddForm({ files: fs, mode: 'upload' })) }, icon('upload_file', { size: 22 }), ' Hochladen'),
       h('button', { class: 'fab-x', onclick: () => pickFiles('cam', (fs) => docAddForm({ files: fs, mode: 'photo' })) }, icon('photo_camera', { size: 22 }), ' Foto machen'))
