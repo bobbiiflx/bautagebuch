@@ -56,8 +56,28 @@ export class Remote {
     if (t.kind === 'shared') {
       return path ? `${G}/drives/${t.driveId}/items/${t.itemId}:/${enc(path)}:` : `${G}/drives/${t.driveId}/items/${t.itemId}`;
     }
-    const root = enc(CONFIG.rootFolder);
+    const root = enc(t.folder || CONFIG.rootFolder);
     return path ? `${G}/me/drive/root:/${root}/${enc(path)}:` : `${G}/me/drive/root:/${root}:`;
+  }
+
+  // Ordner im eigenen OneDrive (Unterordner von path, '' = oberste Ebene)
+  static async listFolders(path = '') {
+    let url = `${G}/me/drive/${path ? `root:/${enc(path)}:` : 'root'}/children?$select=${encodeURIComponent('name,folder')}&$top=200`;
+    const out = [];
+    while (url) {
+      const res = await gfetch(url);
+      if (!res.ok) throw await failFrom(res);
+      const j = await res.json();
+      for (const it of j.value) if (it.folder) out.push(it.name);
+      url = j['@odata.nextLink'];
+    }
+    return out.sort((a, b) => a.localeCompare(b, 'de'));
+  }
+
+  // Enthält der Ordner Bautagebuch-Daten (Unterordner „daten“)?
+  static async hasData(path) {
+    const res = await gfetch(`${G}/me/drive/root:/${enc(path)}/daten:?$select=id`);
+    return res.ok;
   }
 
   async me() {

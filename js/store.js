@@ -434,3 +434,32 @@ export async function removeDemo() {
     }
   }
 }
+
+
+// ---------- Vollsicherung / Wiederherstellung ----------
+// Alle Dateien, die von Einträgen verwendet werden (Fotos, Dokumente, Handschrift)
+export function referencedBlobs() {
+  const out = new Set();
+  for (const t of ['diary', 'costs', 'defects']) {
+    for (const x of all(t)) {
+      for (const id of x.photos || []) { out.add(photoPaths(id).full); out.add(photoPaths(id).thumb); }
+      for (const r of x.sketches || []) { out.add(sketchPaths(r).json); out.add(sketchPaths(r).png); }
+    }
+  }
+  for (const d of all('documents')) if (d.path) out.add(d.path);
+  return [...out];
+}
+export async function getBlobData(path) {
+  let b = await idbGet('blobs', path);
+  if (!b && remote) { try { b = await remote.getBlob(path); } catch { b = null; } }
+  return b || null;
+}
+// Daten ({typ: [Einträge]}) und Dateien (Map Pfad → Blob) aus einer Sicherung übernehmen. Gleiche IDs werden überschrieben.
+export async function importAll(data, blobs = new Map()) {
+  let n = 0;
+  for (const t of TYPES) for (const rec of data?.[t] || []) { if (rec && rec.id) { await save(t, rec); n++; } }
+  for (const [path, blob] of blobs) await putBlobLocal(path, blob);
+  setState({});
+  schedulePush();
+  return { records: n, files: blobs.size };
+}

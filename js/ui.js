@@ -8,6 +8,7 @@ import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import { splashOn, setSplash } from './splash.js';
+import { makeBackup, readBackup } from './backup.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
@@ -1270,6 +1271,44 @@ function locBox() {
   ];
 }
 
+const dlBlob = (name, blob) => {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+};
+
+// Ordner im eigenen OneDrive durchsuchen und als Datenordner wählen (z. B. einen vorhandenen mit Bautagebuch-Daten)
+function folderPicker() {
+  let path = '';
+  const list = h('div', { class: 'fp-list' });
+  const crumb = h('div', { class: 'muted small fp-crumb' });
+  const useBtn = h('button', { type: 'button', class: 'btn primary block' });
+  const dlg = sheet('Ordner in OneDrive wählen', [crumb, list, useBtn], { noSave: true });
+  async function load() {
+    crumb.textContent = 'OneDrive' + (path ? ' / ' + path.split('/').join(' / ') : '');
+    useBtn.hidden = !path;
+    useBtn.textContent = path ? `„${path.split('/').pop()}“ als Datenordner verwenden` : '';
+    list.replaceChildren(h('p', { class: 'muted small' }, 'Lade Ordner …'));
+    try {
+      const names = await Remote.listFolders(path);
+      const rows = names.map((n) => {
+        const full = path ? path + '/' + n : n;
+        const badge = h('span', { class: 'chip' }, '');
+        badge.hidden = true;
+        Remote.hasData(full).then((ok) => { if (ok) { badge.textContent = 'enthält Daten'; badge.classList.add('ok'); badge.hidden = false; } }).catch(() => {});
+        return h('div', { class: 'line', onclick: () => { path = full; load(); } }, icon('folder', { size: 22 }), h('span', { class: 'grow' }, n), badge, icon('chevron_right', { size: 20 }));
+      });
+      list.replaceChildren(
+        path && h('div', { class: 'line', onclick: () => { path = path.split('/').slice(0, -1).join('/'); load(); } }, icon('chevron_left', { size: 22 }), h('span', {}, 'Eine Ebene höher')),
+        ...(rows.length ? rows : [h('p', { class: 'muted small' }, 'Keine Unterordner.')])
+      );
+    } catch (e) { list.replaceChildren(h('p', { class: 'muted small' }, 'Ordner konnten nicht geladen werden: ' + (e.message || e))); }
+  }
+  useBtn.onclick = async () => { const p = path; dlg.close(); await switchTarget({ kind: 'own', folder: p }); toast(`Datenordner: „${p}“.`); };
+  load();
+}
+
 function viewSettings() {
   const st = Store.getState();
   const signed = Auth.isSignedIn();
@@ -1277,6 +1316,19 @@ function viewSettings() {
   const target = Session.getTarget();
   const name = h('input', { type: 'text', value: localStorage.getItem('bt.name') || acc?.name || '', placeholder: 'Dein Name', onchange: (e) => { Store.setUserName(e.target.value.trim()); toast('Name gespeichert.'); } });
   const link = h('input', { type: 'url', placeholder: 'Freigabe-Link aus OneDrive einfügen' });
+  const restoreIn = h('input', { type: 'file', accept: '.zip,.json,application/zip,application/json', hidden: true, onchange: async (e) => {
+    const f = e.target.files[0]; e.target.value = '';
+    if (!f) return;
+    try {
+      toast('Sicherung wird gelesen …', 2500);
+      const { data, blobs } = await readBackup(f);
+      const n = Object.values(data).reduce((a, l) => a + (Array.isArray(l) ? l.length : 0), 0);
+      if (!(await askConfirm(`Sicherung enthält ${n} Einträge und ${blobs.size} Dateien. Einträge mit gleicher Kennung werden überschrieben, alles andere bleibt erhalten. Wiederherstellen?`, 'Wiederherstellen'))) return;
+      const r = await Store.importAll(data, blobs);
+      toast(`Wiederhergestellt: ${r.records} Einträge, ${r.files} Dateien.`, 6000);
+      render();
+    } catch (err) { toast('Wiederherstellen fehlgeschlagen: ' + (err.message || err), 8000); }
+  } });
   const demoCount = ['diary', 'costs', 'defects', 'todos'].reduce((n, t) => n + Store.all(t).filter((x) => x.demo).length, 0);
 
   const connectBox = !Auth.configured()
@@ -1291,8 +1343,9 @@ function viewSettings() {
           h('button', { class: 'pill' + (target.kind === 'own' ? ' on' : ''), onclick: async () => { if (target.kind !== 'own') await switchTarget({ kind: 'own' }); } }, 'Mein OneDrive'),
           h('button', { class: 'pill' + (target.kind === 'shared' ? ' on' : ''), onclick: () => link.focus() }, 'Geteilter Ordner')),
         Session.hasTarget() && (target.kind === 'own'
-          ? h('p', { class: 'muted small' }, `Die Daten liegen im Ordner „${CONFIG.rootFolder}“ in deinem OneDrive.`)
+          ? h('p', { class: 'muted small' }, `Die Daten liegen im Ordner „${target.folder || CONFIG.rootFolder}“ in deinem OneDrive.`)
           : h('p', { class: 'muted small' }, `Verbunden mit dem geteilten Ordner „${target.name}“.`)),
+        h('button', { class: 'btn block', onclick: () => folderPicker() }, icon('folder_open', { size: 20 }), ' Vorhandenen Ordner in meinem OneDrive wählen'),
         field('Mit geteiltem Ordner verbinden', link, 'Für die zweite Person: den Link einfügen, den die erste Person über „Teilen“ in OneDrive erzeugt hat.'),
         h('button', { class: 'btn block', onclick: async () => {
           if (!link.value.trim()) return toast('Bitte zuerst den Freigabe-Link einfügen.');
@@ -1320,11 +1373,22 @@ function viewSettings() {
       h('button', { class: 'btn block', onclick: () => tradeForm(null) }, '+ Eigenes Gewerk')
     ),
     card('Daten',
-      h('button', { class: 'btn block', onclick: () => download(`bautagebuch-sicherung-${today()}.json`, JSON.stringify(Store.exportAll(), null, 2)) }, 'Sicherung herunterladen (JSON)'),
+      h('button', { class: 'btn block', onclick: async (e) => {
+        const b = e.currentTarget; b.disabled = true;
+        try {
+          const r = await makeBackup((i, n) => { b.textContent = `Sicherung läuft … ${i}/${n}`; });
+          dlBlob(`bautagebuch-vollsicherung-${today()}.zip`, r.blob);
+          toast(`Vollsicherung erstellt (${r.files} Dateien${r.missing ? `, ${r.missing} nicht verfügbar` : ''}).`, 6000);
+        } catch (err) { toast('Sicherung fehlgeschlagen: ' + (err.message || err), 7000); }
+        b.disabled = false; b.textContent = 'Vollsicherung herunterladen (ZIP mit Fotos)';
+      } }, 'Vollsicherung herunterladen (ZIP mit Fotos)'),
+      h('button', { class: 'btn block', onclick: () => download(`bautagebuch-sicherung-${today()}.json`, JSON.stringify(Store.exportAll(), null, 2)) }, 'Nur Daten herunterladen (JSON, ohne Fotos)'),
+      h('button', { class: 'btn block', onclick: () => restoreIn.click() }, icon('restart_alt', { size: 20 }), ' Sicherung wiederherstellen …'),
+      restoreIn,
       demoCount
         ? h('button', { class: 'btn block', onclick: async () => { await Store.removeDemo(); toast('Beispieldaten entfernt.'); } }, `Beispieldaten entfernen (${demoCount})`)
         : h('button', { class: 'btn block', onclick: async () => { await Store.loadDemo(); toast('Beispieldaten geladen.'); } }, 'Beispieldaten zum Ausprobieren laden'),
-      h('p', { class: 'muted small' }, 'Beispieldaten sind markiert und lassen sich jederzeit mit einem Tipp entfernen. Sobald OneDrive verbunden ist, werden auch sie hochgeladen – bitte vorher entfernen.')
+      h('p', { class: 'muted small' }, 'Die Vollsicherung enthält alle Einträge samt Fotos, Dokumenten und Handschrift; die JSON-Datei nur die Texte und Zahlen. Beispieldaten sind markiert und lassen sich jederzeit mit einem Tipp entfernen. Sobald OneDrive verbunden ist, werden auch sie hochgeladen – bitte vorher entfernen.')
     ),
     h('p', { class: 'muted small center' }, `Bautagebuch ${CONFIG.version}`)
   );
