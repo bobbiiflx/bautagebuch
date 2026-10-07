@@ -8,7 +8,7 @@ import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import * as Wx from './weather.js';
-import { donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
+import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import * as Fin from './finance.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
@@ -20,7 +20,7 @@ export function h(tag, props = {}, ...kids) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
     else if (k === 'value') value = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
+    else if (k === 'style' && typeof v === 'object') { for (const [sk, sv] of Object.entries(v)) { if (sk.startsWith('--')) el.style.setProperty(sk, sv); else el.style[sk] = sv; } }
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'checked' || k === 'selected' || k === 'disabled') el[k] = !!v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -356,25 +356,137 @@ function diaryForm(entry) {
   });
 }
 
+// ---------- Ansicht: Tagebuch ----------
+// Wochenleiste mit Heute-Linie, farbige Karten je Gewerk, Detailbereich (Tablet) bzw. Detailblatt (Handy)
+const dv = { range: 'week', anchor: today(), day: '', phase: '', who: '', group: 'day', sel: '' };
+const isoOf = (d) => d.toLocaleDateString('sv-SE');
+const dateOf = (iso) => new Date(iso + 'T12:00:00');
+const addDays = (iso, n) => { const d = dateOf(iso); d.setDate(d.getDate() + n); return isoOf(d); };
+const weekStartOf = (iso) => { const d = dateOf(iso); return addDays(iso, -((d.getDay() + 6) % 7)); };
+const isoWeek = (iso) => { const d = dateOf(iso); d.setDate(d.getDate() + 3 - ((d.getDay() + 6) % 7)); const w1 = new Date(d.getFullYear(), 0, 4); return 1 + Math.round(((d - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7); };
+const dShort = (iso) => dateOf(iso).toLocaleDateString('de-DE', { day: 'numeric', month: 'short' }).replace('.', '');
+const dLong = (iso) => dateOf(iso).toLocaleDateString('de-DE', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const HUES = [212, 18, 160, 42, 330, 130, 268, 2, 190, 78, 300, 30];
+function phaseColor(id) {
+  if (!id) return 'var(--muted)';
+  const i = DEFAULT_PHASES.findIndex((p) => p.id === id);
+  const k = i >= 0 ? i : [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  return `hsl(${HUES[k % HUES.length]} 62% 52%)`;
+}
+const whoList = (d) => String(d.who || '').split(/\s*(?:,|;| und | & )\s*/).map((x) => x.trim()).filter(Boolean);
+const initials = (n) => n.split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
+const avatar = (n) => h('span', { class: 'avatar', title: n, style: { background: `hsl(${[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 48%)` } }, initials(n));
+const wideQ = matchMedia('(min-width: 960px)');
+wideQ.addEventListener?.('change', () => render());
+
+function diaryDetail(d, onEdit) {
+  const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
+  const pc = phaseColor(d.phaseId);
+  const day = d.date;
+  const tasks = d.phaseId ? Store.all('todos').filter((t) => t.phaseId === d.phaseId).sort((a, b) => Number(a.done) - Number(b.done)) : [];
+  const defs = Store.all('defects').filter((x) => x.date === day);
+  const costs = Store.all('costs').filter((x) => x.date === day);
+  const who = whoList(d);
+  const row = (label, ...val) => h('div', { class: 'drow' }, h('span', { class: 'dl' }, label), h('span', { class: 'dv' }, ...val));
+  const doneT = tasks.filter((t) => t.done).length;
+  return h('div', { class: 'ddetail', style: { '--pc': pc } },
+    h('div', { class: 'dd-head' },
+      h('div', {}, h('h2', {}, d.title), h('div', { class: 'muted small' }, dLong(d.date))),
+      h('button', { type: 'button', class: 'icon-btn small', 'aria-label': 'Eintrag bearbeiten', onclick: onEdit }, icon('edit', { size: 20 }))),
+    ph && h('section', { class: 'card gcard' },
+      h('div', { class: 'split' }, h('h3', {}, 'Fortschritt'), chip(PHASE_STATES.find((s) => s[0] === ph.state)?.[1] || '', 'phs-' + ph.state)),
+      gauge(ph.progress, pc, ph.name),
+      tasks.length ? h('div', { class: 'muted small center' }, `${doneT} von ${tasks.length} Aufgaben erledigt`) : null),
+    h('section', { class: 'card dlist' },
+      row('Gewerk', d.phaseId ? h('span', { class: 'tchip' }, phaseName(d.phaseId)) : h('span', { class: 'muted' }, '–')),
+      row('Dabei', who.length ? h('span', { class: 'avs' }, who.map(avatar), h('span', { class: 'muted small' }, who.join(', '))) : h('span', { class: 'muted' }, '–')),
+      row('Wetter', d.weather ? h('span', { class: 'wx-s' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 20 }), ' ' + Wx.summary(d.weather)) : h('span', { class: 'muted' }, '–'))),
+    d.text && h('section', { class: 'card' }, h('h3', {}, 'Notizen'), h('p', { class: 'dtext' }, d.text)),
+    d.photos?.length ? h('section', { class: 'card' }, h('h3', {}, `Fotos (${d.photos.length})`), h('div', { class: 'thumbs' }, d.photos.map((id) => thumb(id)))) : null,
+    h('section', { class: 'card' },
+      h('div', { class: 'split' }, h('h3', {}, 'Aufgaben im Gewerk'), d.phaseId && h('button', { type: 'button', class: 'btn-text small', onclick: () => todoForm(null, d.phaseId) }, icon('add', { size: 18 }), ' Neu')),
+      tasks.length ? tasks.map((t) => todoRow(t, false)) : h('p', { class: 'muted small' }, d.phaseId ? 'Noch keine Aufgaben für dieses Gewerk.' : 'Wähle beim Eintrag ein Gewerk, dann erscheinen hier die Aufgaben.')),
+    h('section', { class: 'card' },
+      h('h3', {}, 'Mängel und Kosten an diesem Tag'),
+      defs.length || costs.length
+        ? [...defs.map((x) => h('div', { class: 'hit', onclick: () => defectForm(x) }, icon('warning', { size: 22 }), h('div', { class: 'hit-t' }, h('div', {}, x.title), h('div', { class: 'muted small' }, [x.room, DEFECT_STATES.find((s) => s[0] === x.status)?.[1]].filter(Boolean).join(' · '))))),
+           ...costs.map((x) => h('div', { class: 'hit', onclick: () => costForm(x) }, icon('payments', { size: 22 }), h('div', { class: 'hit-t' }, h('div', {}, `${x.title} · ${fmtEUR(x.amount)}`), h('div', { class: 'muted small' }, x.vendor || ''))))]
+        : h('p', { class: 'muted small' }, 'Nichts erfasst.')));
+}
+
+function openDiaryDetail(d) {
+  let dlg;
+  const edit = () => { dlg.close(); diaryForm(d); };
+  dlg = sheet('Eintrag', diaryDetail(d, edit), { noSave: true });
+}
+
 function viewDiary() {
-  const list = Store.all('diary').sort(byDateDesc);
-  return h(
-    'div',
-    { class: 'view' },
-    list.length
-      ? list.map((d) =>
-          h(
-            'article',
-            { class: 'card entry', onclick: () => diaryForm(d) },
-            h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(d.date)), d.phaseId && chip(phaseName(d.phaseId))),
-            h('h3', {}, d.title),
-            d.weather && h('div', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ' ' + Wx.summary(d.weather)),
-            d.text && h('p', { class: 'clamp' }, d.text),
-            photoStrip(d.photos),
-            h('div', { class: 'muted small' }, [d.who, d.updatedBy].filter(Boolean).join(' · '))
-          )
-        )
-      : empty('Noch keine Einträge', 'Halte fest, was auf der Baustelle passiert – mit Fotos.'),
+  const all = Store.all('diary');
+  const wide = wideQ.matches;
+  const ws = weekStartOf(dv.anchor), we = addDays(ws, 6), t0 = today();
+  const week = Array.from({ length: 7 }, (_, i) => addDays(ws, i));
+  const inRange = (d) => {
+    if (dv.day) return d.date === dv.day;
+    if (dv.range === 'week') return d.date >= ws && d.date <= we;
+    if (dv.range === 'month') return (d.date || '').slice(0, 7) === dv.anchor.slice(0, 7);
+    return true;
+  };
+  const whoAll = [...new Set(all.flatMap(whoList))].sort((a, b) => a.localeCompare(b, 'de'));
+  const list = all.filter((d) => inRange(d) && (!dv.phase || d.phaseId === dv.phase) && (!dv.who || whoList(d).some((w) => w.toLowerCase() === dv.who.toLowerCase()))).sort(byDateDesc);
+  if (wide && !list.some((d) => d.id === dv.sel)) dv.sel = list[0]?.id || '';
+  const set = (patch) => { Object.assign(dv, patch); render(); };
+
+  // Wochenleiste
+  const label = dv.range === 'month' ? dateOf(dv.anchor).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' }) : `KW ${isoWeek(ws)} · ${dShort(ws)} – ${dShort(we)}`;
+  const step = (n) => set({ anchor: dv.range === 'month' ? isoOf(new Date(dateOf(dv.anchor).getFullYear(), dateOf(dv.anchor).getMonth() + n, 1)) : addDays(dv.anchor, 7 * n), day: '' });
+  const strip = h('section', { class: 'card wk' },
+    h('div', { class: 'wk-nav' },
+      h('button', { class: 'icon-btn small', 'aria-label': 'Zurück', onclick: () => step(-1) }, icon('chevron_left', { size: 22 })),
+      h('strong', {}, label),
+      h('button', { class: 'icon-btn small', 'aria-label': 'Weiter', onclick: () => step(1) }, icon('chevron_right', { size: 22 })),
+      h('button', { class: 'pill small', onclick: () => set({ anchor: t0, day: '' }) }, 'Heute')),
+    h('div', { class: 'wk-days' }, week.map((day) => {
+      const es = all.filter((d) => d.date === day);
+      const colors = [...new Set(es.map((d) => phaseColor(d.phaseId)))].slice(0, 3);
+      return h('button', { class: 'wk-day' + (day === t0 ? ' today' : '') + (dv.day === day ? ' sel' : '') + (es.length ? ' has' : ''), 'aria-label': `${dLong(day)}, ${es.length} Einträge`, 'aria-pressed': String(dv.day === day), onclick: () => set({ day: dv.day === day ? '' : day }) },
+        h('span', { class: 'wk-w' }, dateOf(day).toLocaleDateString('de-DE', { weekday: 'narrow' })),
+        h('span', { class: 'wk-n' }, String(dateOf(day).getDate())),
+        h('span', { class: 'wk-dots' }, colors.map((c) => h('i', { style: { background: c } })), es.length > 3 ? h('b', {}, '+') : null));
+    })));
+
+  // Filterleiste
+  const pillSel = (ic, value, options, onch, any) => h('label', { class: 'pillsel' + (value ? ' on' : '') }, icon(ic, { size: 18 }), h('select', { value, onchange: (e) => onch(e.target.value), 'aria-label': any }, h('option', { value: '' }, any), options.map(([v, t]) => h('option', { value: v, selected: v === value }, t))));
+  const filters = h('div', { class: 'pills dfilters' },
+    h('div', { class: 'segmini' }, [['week', 'Woche'], ['month', 'Monat'], ['all', 'Alle']].map(([k, t]) => h('button', { class: dv.range === k && !dv.day ? 'on' : '', onclick: () => set({ range: k, day: '' }) }, t))),
+    pillSel('layers', dv.phase, phases().map((p) => [p.id, p.name]), (v) => set({ phase: v }), 'Alle Gewerke'),
+    pillSel('groups', dv.who, whoAll.map((w) => [w, w]), (v) => set({ who: v }), 'Alle Personen'),
+    pillSel('menu_book', dv.group === 'phase' ? 'phase' : '', [['phase', 'nach Gewerk']], (v) => set({ group: v || 'day' }), 'nach Tag'));
+
+  const card = (d) => {
+    const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
+    const who = whoList(d);
+    const sel = wide && dv.sel === d.id;
+    return h('article', { class: 'card dcard' + (sel ? ' sel' : ''), style: { '--pc': phaseColor(d.phaseId) }, tabindex: 0, onclick: () => { if (wide) set({ sel: d.id }); else openDiaryDetail(d); }, onkeydown: (e) => { if (e.key === 'Enter') e.currentTarget.click(); } },
+      h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dLong(d.date)), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
+      h('h3', {}, d.title),
+      d.text && h('p', { class: 'clamp' }, d.text),
+      h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), who.slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), who.length > 2 && h('span', { class: 'tchip plain' }, `+${who.length - 2}`)),
+      h('div', { class: 'dc-foot' },
+        ph ? h('div', { class: 'dc-prog' }, h('div', { class: 'bar' }, h('div', { class: 'bar-fill', style: { width: ph.progress + '%', background: 'var(--pc)' } })), h('span', { class: 'muted small' }, ph.progress + '%')) : h('span'),
+        d.photos?.length ? h('span', { class: 'phs' }, icon('image', { size: 18 }), String(d.photos.length)) : null));
+  };
+
+  let body;
+  if (!list.length) body = empty(all.length ? 'Keine Einträge in dieser Auswahl' : 'Noch keine Einträge', all.length ? 'Wähle eine andere Woche, einen anderen Zeitraum oder entferne die Filter.' : 'Halte fest, was auf der Baustelle passiert – mit Fotos.');
+  else {
+    const groups = new Map();
+    for (const d of list) { const k = dv.group === 'phase' ? (d.phaseId || '') : d.date; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); }
+    body = [...groups].map(([k, es]) => h('section', { class: 'dgroup' }, h('h4', { class: 'dg-h' }, dv.group === 'phase' ? (k ? phaseName(k) : 'Ohne Gewerk') : dLong(k), h('span', { class: 'muted small' }, ` ${es.length}`)), es.map(card)));
+  }
+  const selected = wide ? all.find((d) => d.id === dv.sel) : null;
+  return h('div', { class: 'view diary' + (wide ? ' wide' : '') },
+    h('div', { class: 'd-main' }, strip, filters, body),
+    wide && h('aside', { class: 'd-side' }, selected ? diaryDetail(selected, () => diaryForm(selected)) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Wähle links einen Eintrag.'))),
     fab(() => diaryForm())
   );
 }
@@ -1217,6 +1329,7 @@ export function render() {
   document.title = title + ' · Bautagebuch';
   root.querySelector('.title').textContent = title;
   headerSync.replaceChildren(syncBadge());
+  mainEl.classList.toggle('wide', r === 'tagebuch');
   mainEl.replaceChildren(view());
   window.scrollTo(0, y);
 }

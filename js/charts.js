@@ -140,3 +140,14 @@ export function cumLine(data, budget, color = 'var(--viz-1)', unit = 'insgesamt'
   });
   return withTip(H('div', { class: 'viz-box' }, svg));
 }
+
+// Halbkreis-Anzeige (Fortschritt) mit Mittelwert
+export function gauge(pct, color = 'var(--viz-1)', label = 'erledigt') {
+  const R = 70, cx = 90, cy = 88, a = Math.PI * Math.min(1, Math.max(0, pct / 100));
+  const arc = (t) => `M${cx - R},${cy} A${R},${R} 0 0 1 ${cx + R * Math.cos(Math.PI - t)},${cy - R * Math.sin(Math.PI - t)}`;
+  const svg = S('svg', { viewBox: '0 0 180 108', class: 'viz-svg gauge', role: 'img', 'aria-label': `${Math.round(pct)} % ${label}` });
+  svg.append(S('path', { d: arc(Math.PI), fill: 'none', stroke: 'var(--viz-track)', 'stroke-width': 16, 'stroke-linecap': 'round' }));
+  if (pct > 0) svg.append(S('path', { d: arc(Math.max(a, 0.02)), fill: 'none', stroke: color, 'stroke-width': 16, 'stroke-linecap': 'round' }));
+  svg.append(S('text', { x: cx, y: cy - 14, 'text-anchor': 'middle', class: 'viz-big gauge-n' }, `${Math.round(pct)}%`), S('text', { x: cx, y: cy + 4, 'text-anchor': 'middle', class: 'viz-sub' }, label));
+  return H('div', { class: 'viz-box gauge-box' }, svg);
+}
