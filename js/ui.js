@@ -530,6 +530,65 @@ function viewDiary() {
   );
 }
 
+// ---------- Dokumente an Kosten/Angeboten ----------
+const costDocCat = (status) => (status === 'angebot' ? 'Angebote' : 'Rechnungen');
+const docsOfCost = (c) => (c.docIds || []).map((id) => Store.get('documents', id)).filter(Boolean);
+const costsOfDoc = (d) => Store.all('costs').filter((c) => (c.docIds || []).includes(d.id));
+
+// Datei direkt als Dokument anlegen (oder bei identischem Inhalt das vorhandene verwenden)
+async function quickAddDoc(file, { cat, phaseId = '', tags = [], note = '' }) {
+  const hash = await Store.fileHash(file);
+  const twin = await Store.findDuplicate(hash, file);
+  if (twin) { toast(`„${twin.name}“ gab es schon – wird verknüpft.`); return { doc: Store.get('documents', twin.id) || twin, created: false }; }
+  const id = Store.uid();
+  const info = await Store.addDocumentFile(file, cat, id);
+  const doc = await Store.save('documents', { id, name: file.name.replace(/\.[^.]+$/, ''), category: cat, tags, pinned: false, phaseId, note, date: today(), hash, ...info });
+  ensurePreview(doc, true);
+  return { doc, created: true };
+}
+
+// Feld im Kosten-Formular: Dokumente hochladen oder vorhandene verknüpfen
+function docAttachField(initial = [], meta = () => ({})) {
+  const ids = [...initial];
+  const made = [];
+  const list = h('div', { class: 'attlist' });
+  const redraw = () => list.replaceChildren(...ids.map((id) => {
+    const d = Store.get('documents', id);
+    if (!d) return null;
+    return h('div', { class: 'att' },
+      h('button', { type: 'button', class: 'att-open', onclick: () => openDoc(d) }, docIcon(d.mime), h('span', { class: 'att-n' }, d.name)),
+      h('button', { type: 'button', class: 'mv', 'aria-label': 'Verknüpfung entfernen', onclick: () => { ids.splice(ids.indexOf(id), 1); if (made.includes(id)) { made.splice(made.indexOf(id), 1); Store.remove('documents', id); } redraw(); } }, '×'));
+  }).filter(Boolean));
+  const upload = () => pickFiles('up', async (fs) => {
+    for (const f of fs) {
+      try {
+        const { doc, created } = await quickAddDoc(f, meta());
+        if (!ids.includes(doc.id)) ids.push(doc.id);
+        if (created) made.push(doc.id);
+      } catch (e) { toast('Hochladen fehlgeschlagen: ' + (e.message || e)); }
+    }
+    redraw();
+  });
+  const link = () => {
+    const free = Store.all('documents').filter((d) => !ids.includes(d.id)).sort(byDateDesc);
+    if (!free.length) return toast('Es gibt keine weiteren Dokumente zum Verknüpfen.');
+    const pick = new Set();
+    sheet('Dokument verknüpfen', [h('div', { class: 'mlist' }, free.map((d) => h('label', { class: 'mrow' },
+      h('input', { type: 'checkbox', onchange: (e) => (e.target.checked ? pick.add(d.id) : pick.delete(d.id)) }),
+      docIcon(d.mime), h('span', { class: 'mt' }, d.name, h('small', { class: 'muted' }, ' · ' + docCat(d))))))], {
+      saveLabel: 'Verknüpfen',
+      onSave: () => { pick.forEach((id) => ids.push(id)); redraw(); },
+    });
+  };
+  redraw();
+  const el = h('div', { class: 'photofield' }, h('span', { class: 'lbl' }, 'Dokumente'), list,
+    h('div', { class: 'row' },
+      h('button', { type: 'button', class: 'btn', onclick: upload }, icon('upload_file', { size: 20 }), ' Hochladen'),
+      h('button', { type: 'button', class: 'btn', onclick: link }, icon('link', { size: 20 }), ' Vorhandenes')),
+    h('p', { class: 'muted small' }, 'Die Dokumente erscheinen auch unter „Dokumente“.'));
+  return { el, ids, commit: () => {}, cancel: () => made.forEach((id) => Store.remove('documents', id)) };
+}
+
 // ---------- Ansicht: Kosten ----------
 function costForm(entry) {
   const e = entry || { date: today(), title: '', amount: '', vendor: '', phaseId: '', status: 'offen', note: '', photos: [] };
@@ -547,12 +606,20 @@ function costForm(entry) {
   subOn.addEventListener('change', () => { subBox.hidden = !subOn.checked; });
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el], {
+  const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
-      await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids });
+      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
+      // Dokumente mit dem Kosten-Eintrag abgleichen: Kategorie (Angebot/Rechnung) und Gewerk
+      for (const d of docsOfCost(saved)) {
+        const patch = {};
+        if (['Angebote', 'Rechnungen'].includes(docCat(d)) && docCat(d) !== costDocCat(saved.status)) patch.category = costDocCat(saved.status);
+        if (!d.phaseId && saved.phaseId) patch.phaseId = saved.phaseId;
+        if (Object.keys(patch).length) await Store.save('documents', { ...d, ...patch });
+      }
     },
-    onCancel: () => pf.cancel(),
+    onCancel: () => { pf.cancel(); da.cancel(); },
     onDelete: entry && (() => Store.remove('costs', e.id)),
   });
 }
@@ -586,7 +653,8 @@ function budgetForm() {
   });
 }
 
-let costFilter = { phase: '', status: '' };
+const costFilter = { phase: new Set(), status: new Set() };
+const COST_ICONS = { angebot: 'request_quote', offen: 'receipt_long', bezahlt: 'task_alt' };
 let costTab = 'auswertung';
 
 // Diagramm-Karte mit Umschalter Grafik / Tabelle (für alle, die Zahlen lieber lesen)
@@ -665,11 +733,17 @@ function viewCosts() {
   const { spent, subPaid, subOpen, net, open, offers } = sums;
   const budget = budgetInfo();
   const parts = budgetParts();
-  let list = all.filter((c) => (!costFilter.phase || c.phaseId === costFilter.phase) && (!costFilter.status || c.status === costFilter.status)).sort(byDateDesc);
+  const fcount = costFilter.phase.size + costFilter.status.size;
+  let list = all.filter((c) => (!costFilter.phase.size || costFilter.phase.has(c.phaseId)) && (!costFilter.status.size || costFilter.status.has(c.status))).sort(byDateDesc);
   const usages = [...phases(), ...tradeOptions()];
 
-  const fPhase = h('select', { value: costFilter.phase, onchange: (e) => { costFilter.phase = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Gewerke'), usages.map((p) => h('option', { value: p.id }, p.name)));
-  const fStatus = h('select', { value: costFilter.status, onchange: (e) => { costFilter.status = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Status'), optionList(COST_STATES, costFilter.status));
+  const usedUsage = usages.filter((p) => all.some((c) => c.phaseId === p.id));
+  const fBar = h('div', { class: 'pills dfilters' },
+    h('button', { type: 'button', class: 'pill small fpill' + (fcount ? ' on' : ''), onclick: () => filterSheet(costFilter, [
+      { title: 'Status', key: 'status', items: COST_STATES.map(([v, t]) => ({ v, t, icon: icon(COST_ICONS[v] || 'receipt_long', { size: 22 }) })) },
+      { title: 'Gewerk / Verwendung', key: 'phase', items: usedUsage.map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
+    ]) }, icon('tune', { size: 18 }), ' Filter', fcount ? h('span', { class: 'fcount' }, String(fcount)) : null),
+    fcount ? h('button', { class: 'btn-text small', onclick: () => { costFilter.phase.clear(); costFilter.status.clear(); render(); } }, 'Zurücksetzen') : null);
   const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Rechnungen (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
 
   const summary = [
@@ -690,7 +764,7 @@ function viewCosts() {
     costCharts(all, sums, budget),
   ];
   const invoices = [
-    h('div', { class: 'filters' }, fPhase, fStatus),
+    fBar,
     list.length
       ? list.map((c) =>
           h(
@@ -700,10 +774,11 @@ function viewCosts() {
             h('div', { class: 'split' }, h('h3', {}, c.title), h('strong', { class: 'amount' }, fmtEUR(c.amount))),
             h('div', { class: 'muted small' }, [c.vendor, phaseName(c.phaseId)].filter(Boolean).join(' · ')),
             c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
+            docsOfCost(c).length ? h('div', { class: 'att-chips' }, docsOfCost(c).map((d) => h('button', { type: 'button', class: 'tchip plain attc', onclick: (ev) => { ev.stopPropagation(); openDoc(d); } }, icon('attach_file', { size: 14 }), ' ' + d.name))) : null,
             photoStrip(c.photos)
           )
         )
-      : empty('Keine Kosten', 'Trage Rechnungen, Abschläge und Angebote ein und fotografiere die Belege.'),
+      : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.'),
   ];
   return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? summary : invoices, fab(() => costForm()));
 }
@@ -1398,7 +1473,8 @@ function docEditForm(d) {
   const note = h('textarea', { rows: 3, value: d.note || '' });
   const pin = h('input', { type: 'checkbox', role: 'switch', checked: !!d.pinned });
   f.offer(d.fileName || d.name, d.mime);
-  sheet('Dokument', [h('p', { class: 'muted small' }, `${fmtSize(d.size || 0)} · ${fmtDate(d.date)}${d.fileName ? ' · ' + d.fileName : ''}`), field('Bezeichnung', name), ...f.els, h('label', { class: 'switch-row' }, h('span', {}, 'Oben anpinnen'), pin), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
+  const links = costsOfDoc(d);
+  sheet('Dokument', [h('p', { class: 'muted small' }, `${fmtSize(d.size || 0)} · ${fmtDate(d.date)}${d.fileName ? ' · ' + d.fileName : ''}`), ...links.map((c) => h('button', { type: 'button', class: 'btn block', onclick: () => costForm(c) }, icon('receipt_long', { size: 20 }), ` Verknüpft mit Kosten: ${c.title}`)), field('Bezeichnung', name), ...f.els, h('label', { class: 'switch-row' }, h('span', {}, 'Oben anpinnen'), pin), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
     onSave: () => Store.save('documents', { ...d, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: pin.checked, phaseId: f.phase.value, note: note.value.trim() }),
     onDelete: () => Store.remove('documents', d.id),
   });
@@ -1410,22 +1486,24 @@ const CAT_ICONS = { 'Verträge': 'edit_note', 'Pläne': 'straighten', 'Rechnunge
 const docMatches = (d, f) => (!f.cat.size || f.cat.has(docCat(d))) && (!f.phase.size || f.phase.has(d.phaseId)) && (!f.tag.size || (d.tags || []).some((t) => f.tag.has(t))) && (!f.pin || d.pinned);
 
 // Filtermaske: Kategorien, Gewerke und Tags in einem Blatt (Mehrfachauswahl, mit Icons). Erst „Anwenden“ übernimmt die Auswahl.
-function docFilterSheet(opts) {
-  const tmp = { cat: new Set(docF.cat), phase: new Set(docF.phase), tag: new Set(docF.tag) };
-  const section = (title, key, items) => h('section', { class: 'fsec' },
-    h('h3', {}, title, h('span', { class: 'muted small' }, ' ' + (items.length ? '' : '– nichts vorhanden'))),
-    h('div', { class: 'mlist' }, items.map((o) => h('label', { class: 'mrow' },
-      h('input', { type: 'checkbox', checked: tmp[key].has(o.v), onchange: (e) => { e.target.checked ? tmp[key].add(o.v) : tmp[key].delete(o.v); } }),
+// Filter-Maske (Mehrfachauswahl, Anwenden/Abbrechen). F = Objekt aus Sets, sections = [{title, key, items:[{v,t,icon}]}]
+function filterSheet(F, sections) {
+  const tmp = Object.fromEntries(sections.map((x) => [x.key, new Set(F[x.key])]));
+  const section = (x) => h('section', { class: 'fsec' },
+    h('h3', {}, x.title, h('span', { class: 'muted small' }, ' ' + (x.items.length ? '' : '– nichts vorhanden'))),
+    h('div', { class: 'mlist' }, x.items.map((o) => h('label', { class: 'mrow' },
+      h('input', { type: 'checkbox', checked: tmp[x.key].has(o.v), onchange: (e) => { e.target.checked ? tmp[x.key].add(o.v) : tmp[x.key].delete(o.v); } }),
       o.icon, h('span', { class: 'mt' }, o.t)))));
   sheet('Filter', [
-    section('Kategorie', 'cat', opts.cats),
-    section('Gewerk', 'phase', opts.phases),
-    section('Tags', 'tag', opts.tags),
-    h('button', { type: 'button', class: 'btn block', onclick: (e) => { Object.values(tmp).forEach((x) => x.clear()); e.currentTarget.closest('form').querySelectorAll('input[type=checkbox]').forEach((c) => (c.checked = false)); } }, 'Alle Filter aufheben'),
+    ...sections.map(section),
+    h('button', { type: 'button', class: 'btn block', onclick: (e) => { Object.values(tmp).forEach((v) => v.clear()); e.currentTarget.closest('form').querySelectorAll('input[type=checkbox]').forEach((c) => (c.checked = false)); } }, 'Alle Filter aufheben'),
   ], {
     saveLabel: 'Anwenden',
-    onSave: () => { docF.cat = tmp.cat; docF.phase = tmp.phase; docF.tag = tmp.tag; render(); },
+    onSave: () => { sections.forEach((x) => { F[x.key] = tmp[x.key]; }); render(); },
   });
+}
+function docFilterSheet(opts) {
+  filterSheet(docF, [{ title: 'Kategorie', key: 'cat', items: opts.cats }, { title: 'Gewerk', key: 'phase', items: opts.phases }, { title: 'Tags', key: 'tag', items: opts.tags }]);
 }
 
 // Rechnungs-Fotos aus „Kosten“ erscheinen verlinkt (ohne Kopie) in den Dokumenten
@@ -1433,7 +1511,7 @@ function costDocs() {
   const out = [];
   for (const c of Store.all('costs')) {
     const ph = c.photos || [];
-    ph.forEach((id, i) => out.push({ id: `cost:${c.id}:${id}`, virtual: true, costId: c.id, name: c.title + (ph.length > 1 ? ` (${i + 1}/${ph.length})` : ''), category: 'Rechnungen', tags: c.vendor ? [c.vendor] : [], phaseId: c.phaseId, date: c.date, mime: 'image/jpeg', path: Store.photoPaths(id).full, fileName: `${c.title}.jpg` }));
+    ph.forEach((id, i) => out.push({ id: `cost:${c.id}:${id}`, virtual: true, costId: c.id, name: c.title + (ph.length > 1 ? ` (${i + 1}/${ph.length})` : ''), category: costDocCat(c.status), tags: c.vendor ? [c.vendor] : [], phaseId: c.phaseId, date: c.date, mime: 'image/jpeg', path: Store.photoPaths(id).full, fileName: `${c.title}.jpg` }));
   }
   return out;
 }
@@ -1452,6 +1530,7 @@ function viewDocs() {
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
       ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t)),
       d.virtual && h('span', { class: 'tchip plain' }, 'aus Kosten'),
+      !d.virtual && costsOfDoc(d).length ? h('span', { class: 'tchip plain' }, 'Kosten') : null,
       d.sketches?.length && h('span', { class: 'tchip plain' }, 'markiert')].filter(Boolean);
     const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
     return h('div', { class: 'doc' + (d.pinned ? ' pinned' : ''), role: 'button', tabindex: 0, onclick: () => openDoc(d), onkeydown: (e) => { if (e.key === 'Enter') openDoc(d); } },
