@@ -1193,13 +1193,35 @@ async function openDoc(d) {
   };
   const pdfInfo = h('div', { class: 'dv-pg muted small' });
   const pdfBox = mime.includes('pdf') ? h('div', { class: 'dv-page' }) : null;
-  const body = mime.startsWith('image/') ? h('img', { class: 'dv-img', src: url, alt: d.name })
+  const isImg = mime.startsWith('image/');
+  const mark0 = d.sketches?.[0];
+  const imgEl = h('img', { class: 'dv-img', src: url, alt: d.name });
+  let marked = !!mark0;
+  const showMark = async () => {
+    if (!isImg || !mark0) return;
+    const u = marked ? await Store.blobURL(Store.sketchPaths(mark0).png).catch(() => null) : url;
+    if (u) imgEl.src = u;
+    togBtn?.replaceChildren(icon(marked ? 'visibility' : 'draw', { size: 18 }), marked ? ' Original' : ' Markiert');
+  };
+  const togBtn = isImg && mark0 ? h('button', { type: 'button', class: 'btn small', onclick: () => { marked = !marked; showMark(); } }) : null;
+  const annotate = async () => {
+    const n = await openInk({ ref: mark0 || null, docBg: { path: d.path, label: d.name } });
+    if (!n || (mark0 && n.v === mark0.v)) return;
+    const cur = Store.get('documents', d.id) || d;
+    await Store.save('documents', { ...cur, sketches: [n] });
+    if (mark0) await Store.dropSketches([mark0]);
+    close();
+    openDoc(Store.get('documents', d.id));
+  };
+  const body = isImg ? imgEl
     : pdfBox ? pdfBox
     : h('div', { class: 'dv-none' }, docIcon(mime), h('p', {}, 'Für diesen Dateityp gibt es keine Vorschau in der App.'), h('p', { class: 'muted small' }, 'Lade die Datei herunter oder teile sie, um sie in einer anderen App zu öffnen.'));
   dlg.append(
     h('div', { class: 'dv-bar' },
       h('button', { type: 'button', class: 'ink-b', 'aria-label': 'Schließen', onclick: close }, icon('close', { size: 24 })),
       h('div', { class: 'dv-t' }, h('div', { class: 'dv-n' }, d.name), h('div', { class: 'muted small dv-w' }, icon(where[0], { size: 16 }), ' ' + where[1])),
+      isImg && !d.virtual ? h('button', { type: 'button', class: 'btn small', onclick: annotate }, icon('draw', { size: 18 }), mark0 ? ' Bearbeiten' : ' Markieren') : null,
+      togBtn,
       navigator.canShare ? h('button', { type: 'button', class: 'btn small', onclick: share }, 'Teilen') : null,
       h('button', { type: 'button', class: 'btn small', onclick: download }, 'Herunterladen'),
       mime.includes('pdf') ? h('button', { type: 'button', class: 'btn small', onclick: () => window.open(url, '_blank') }, 'Vollbild') : null),
@@ -1208,6 +1230,7 @@ async function openDoc(d) {
   document.body.append(dlg);
   dlg.showModal();
   if (pdfBox) fitPdfFirstPage(dlg, pdfBox, pdfInfo, url, d);
+  showMark();
 }
 
 // Erste PDF-Seite komplett sichtbar anzeigen: Seitenmaße aus der Datei lesen, Rahmen passend einpassen, Rest abschneiden
@@ -1406,7 +1429,8 @@ function viewDocs() {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
       ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t)),
-      d.virtual && h('span', { class: 'tchip plain' }, 'aus Kosten')].filter(Boolean);
+      d.virtual && h('span', { class: 'tchip plain' }, 'aus Kosten'),
+      d.sketches?.length && h('span', { class: 'tchip plain' }, 'markiert')].filter(Boolean);
     const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
     return h('div', { class: 'doc' + (d.pinned ? ' pinned' : ''), role: 'button', tabindex: 0, onclick: () => openDoc(d), onkeydown: (e) => { if (e.key === 'Enter') openDoc(d); } },
       h('div', { class: 'doc-i' }, docIcon(d.mime)),

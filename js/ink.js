@@ -113,7 +113,7 @@ function loadImg(id) {
   if (imgs.has(id)) return new Promise((r) => { const i = imgs.get(id); if (i.complete) r(i); else i.addEventListener('load', () => r(i), { once: true }); });
   return new Promise(async (resolve) => {
     try {
-      const url = await Store.blobURL(Store.photoPaths(id).full);
+      const url = await Store.blobURL(String(id).startsWith('path:') ? id.slice(5) : Store.photoPaths(id).full);
       if (!url) return resolve(null);
       const img = new Image();
       imgs.set(id, img);
@@ -129,8 +129,11 @@ async function renderPreview(page) {
   if (page.bg === 'photo') await loadImg(page.photo);
   let maxY = 0;
   for (const s of page.strokes) maxY = Math.max(maxY, bbox(s)[3]);
-  const hh = page.bg === 'photo' ? PH : Math.min(PH, Math.max(420, maxY + 70));
-  const W = 640, k = W / PW;
+  let hh = Math.min(PH, Math.max(420, maxY + 70));
+  const im = page.bg === 'photo' ? imgs.get(page.photo) : null;
+  if (im?.naturalWidth) hh = Math.min(PH, Math.max(Math.ceil(im.naturalHeight * Math.min(PW / im.naturalWidth, PH / im.naturalHeight)), maxY + 30));
+  else if (page.bg === 'photo') hh = PH;
+  const W = String(page.photo || '').startsWith('path:') ? 1600 : 640, k = W / PW;
   const c = document.createElement('canvas');
   c.width = W; c.height = Math.round(hh * k);
   const ctx = c.getContext('2d');
@@ -142,9 +145,9 @@ async function renderPreview(page) {
 
 // ---------- Editor ----------
 // openInk({ ref, photoIds }) → Promise<neue ref | null>
-export async function openInk({ ref = null, photoIds = [] } = {}) {
+export async function openInk({ ref = null, photoIds = [], docBg = null } = {}) {
   return new Promise((resolve) => {
-    let doc = { v: 1, pages: [{ bg: 'lined', photo: null, strokes: [] }] };
+    let doc = { v: 1, pages: [docBg && !ref ? { bg: 'photo', photo: 'path:' + docBg.path, strokes: [] } : { bg: 'lined', photo: null, strokes: [] }] };
     let pi = 0, tool = 'pen', color = COLORS[0][0], width = WIDTHS[1][0], finger = false, zoom = 1, k = 1;
     let live = null, lasso = null, mv = null, erasing = false, penAt = 0, penDown = false;
     let changed = false, ready = false;
@@ -183,6 +186,7 @@ export async function openInk({ ref = null, photoIds = [] } = {}) {
       repaint();
     } },
       h('option', { value: 'lined' }, 'Liniert'), h('option', { value: 'grid' }, 'Kariert'), h('option', { value: 'blank' }, 'Blanko'),
+      docBg && h('option', { value: 'photo:path:' + docBg.path }, (docBg.label || 'Dokument') + ' (anmerken)'),
       photoIds.map((id, i) => h('option', { value: 'photo:' + id }, `Foto ${i + 1} (anmerken)`)));
     const pageLbl = h('span', { class: 'ink-pg' });
     const bPrev = btn('chevron_left', 'Vorherige Seite', () => goPage(pi - 1));
@@ -443,7 +447,7 @@ export async function openInk({ ref = null, photoIds = [] } = {}) {
         for (const p of doc.pages) if (p.bg === 'photo') loadImg(p.photo).then(repaint);
         ready = true; stage.classList.remove('loading'); mark(); repaint();
       }).catch(() => { alert('Die Notiz konnte nicht geladen werden (offline?).'); ready = false; closed = false; close(ref); });
-    } else ready = true;
+    } else { ready = true; if (docBg) loadImg('path:' + docBg.path).then(repaint); }
   });
 }
 

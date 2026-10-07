@@ -463,7 +463,7 @@ export async function removeDemo() {
 // Alle Dateien, die von Einträgen verwendet werden (Fotos, Dokumente, Handschrift)
 export function referencedBlobs() {
   const out = new Set();
-  for (const t of ['diary', 'costs', 'defects']) {
+  for (const t of ['diary', 'costs', 'defects', 'documents']) {
     for (const x of all(t)) {
       for (const id of x.photos || []) { out.add(photoPaths(id).full); out.add(photoPaths(id).thumb); }
       for (const r of x.sketches || []) { out.add(sketchPaths(r).json); out.add(sketchPaths(r).png); }
