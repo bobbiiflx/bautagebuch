@@ -6,6 +6,7 @@ import { Remote } from './onedrive.js';
 import { CONFIG } from './config.js';
 import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
+import { getTheme, setTheme } from './theme.js';
 import { donut, stackBar, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
@@ -416,10 +417,11 @@ let costTab = 'auswertung';
 function chartCard(title, chart, legendEl, rows, note) {
   let table = false;
   const body = h('div', { class: 'viz' });
-  const btn = h('button', { class: 'icon-btn small', 'aria-label': 'Als Tabelle anzeigen', 'aria-pressed': 'false', onclick: () => { table = !table; btn.setAttribute('aria-pressed', String(table)); btn.setAttribute('aria-label', table ? 'Als Grafik anzeigen' : 'Als Tabelle anzeigen'); paint(); } }, icon('table_chart', { size: 20 }));
-  const paint = () => body.replaceChildren(table
+  const btn = h('button', { class: 'icon-btn small', onclick: () => { table = !table; paint(); } });
+  const paint = () => { paintBtn(); body.replaceChildren(table
     ? h('table', { class: 'viz-table' }, h('tbody', {}, rows.map(([l, v]) => h('tr', {}, h('th', { scope: 'row' }, l), h('td', {}, v)))))
-    : h('div', {}, chart, legendEl, note && h('p', { class: 'muted small' }, note)));
+    : h('div', {}, chart, legendEl, note && h('p', { class: 'muted small' }, note))); };
+  const paintBtn = () => { btn.replaceChildren(icon(table ? 'insights' : 'table_chart', { size: 20 })); btn.setAttribute('aria-label', table ? 'Als Grafik anzeigen' : 'Als Tabelle anzeigen'); };
   paint();
   return h('section', { class: 'card chart' }, h('div', { class: 'split' }, h('h3', {}, title), btn), body);
 }
@@ -472,7 +474,10 @@ function costCharts(all, sums, budget) {
     const segs = [{ label: 'Ausgezahlt', value: sums.subPaid, color: 'var(--viz-3)' }, { label: 'Noch ausstehend', value: sums.subOpen, color: 'var(--viz-4)' }];
     out.push(chartCard('Förderungen', stackBar(segs), legend(segs.map((x) => ({ ...x, text: fmtEUR(x.value) }))), [...segs.map((x) => [x.label, fmtEUR(x.value)]), ['Gesamt', fmtEUR(sums.subPaid + sums.subOpen)]]));
   }
-  return h('div', { class: 'view-inner' }, out);
+  const track = h('div', { class: 'swipe', tabindex: 0, 'aria-label': 'Diagramme, seitlich wischen' }, out);
+  const dots = h('div', { class: 'dots' }, out.map((_, i) => h('button', { class: 'dot' + (i ? '' : ' on'), 'aria-label': `Diagramm ${i + 1}`, onclick: () => track.scrollTo({ left: track.clientWidth * i, behavior: 'smooth' }) })));
+  track.addEventListener('scroll', () => { const i = Math.round(track.scrollLeft / track.clientWidth); [...dots.children].forEach((d, j) => d.classList.toggle('on', i === j)); }, { passive: true });
+  return h('div', { class: 'view-inner' }, track, out.length > 1 && dots);
 }
 
 function viewCosts() {
@@ -820,6 +825,7 @@ function viewSettings() {
     { class: 'view' },
     card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
+    card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
     card('Eigene Gewerke',
       customTrades().length ? customTrades().map((t) => h('div', { class: 'line', onclick: () => tradeForm(t) }, h('span', {}, t.name), h('span', { class: 'muted small' }, 'bearbeiten'))) : h('p', { class: 'muted small' }, 'Material, Architektur und Planung sowie Werkzeug gibt es schon. Hier kannst du weitere Gewerke oder Verwendungen anlegen.'),
       h('button', { class: 'btn block', onclick: () => tradeForm(null) }, '+ Eigenes Gewerk')

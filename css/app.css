@@ -301,3 +301,13 @@ dialog.drawer::backdrop { background: rgba(10,12,16,.45); }
 .viz-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .viz-table th { text-align: left; font-weight: 500; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .viz-table td { text-align: right; padding: 7px 0; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+
+/* Wischbare Diagramme */
+.swipe { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; border-radius: var(--radius); }
+.swipe::-webkit-scrollbar { display: none; }
+.swipe > .card { flex: 0 0 100%; scroll-snap-align: center; min-width: 0; min-height: 360px; }
+.dots { display: flex; justify-content: center; gap: 4px; }
+.dot { width: 24px; height: 24px; border: 0; background: transparent; padding: 0; display: grid; place-items: center; }
+.dot::after { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--line); transition: width .15s, background .15s; }
+.dot.on::after { width: 20px; background: var(--accent); }
+.seg .pill { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }

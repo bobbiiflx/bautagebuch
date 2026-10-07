@@ -3,6 +3,8 @@ import * as Store from './store.js';
 import * as Session from './session.js';
 import * as UI from './ui.js';
 import { CONFIG } from './config.js';
+import { applyTheme } from './theme.js';
+applyTheme();
 
 async function boot() {
   let authError = null;
