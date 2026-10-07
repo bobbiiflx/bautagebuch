@@ -75,6 +75,32 @@ function niceMax(v) {
   return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p;
 }
 
+const labelAt = (i, n) => { const step = n <= 8 ? 1 : n <= 14 ? 2 : Math.ceil(n / 7); return (n - 1 - i) % step === 0; };
+
+// Gestapelte Säulen (z. B. Zins / Tilgung / Sondertilgung je Jahr): data = [{ label, vals: [..] }], segs = [{ label, color }]
+export function stackBars(data, segs) {
+  const W = 340, Ht = 200, L = 40, B = 26, T = 12, n = data.length;
+  const tot = data.map((d) => d.vals.reduce((a, b) => a + b, 0));
+  const max = niceMax(Math.max(...tot, 1));
+  const bw = (W - L) / n, w = Math.min(30, bw * 0.7);
+  const y = (v) => T + (Ht - T - B) * (1 - v / max);
+  const svg = S('svg', { viewBox: `0 0 ${W} ${Ht}`, class: 'viz-svg', role: 'img', 'aria-label': 'Zinsen und Tilgung je Jahr' });
+  [0, 0.5, 1].forEach((f) => svg.append(S('line', { x1: L, x2: W, y1: y(max * f), y2: y(max * f), class: 'viz-grid' }), S('text', { x: L - 6, y: y(max * f) + 4, 'text-anchor': 'end', class: 'viz-axis' }, short(max * f))));
+  data.forEach((d, i) => {
+    const x = L + bw * i + (bw - w) / 2;
+    let acc = 0;
+    const tip = `${d.label}: ` + segs.map((sg, k) => `${sg.label} ${money(d.vals[k])}`).join(' · ');
+    d.vals.forEach((v, k) => {
+      if (v <= 0) return;
+      const y1 = y(acc + v), y0 = y(acc); acc += v;
+      svg.append(S('rect', { x, y: y1, width: w, height: Math.max(0, y0 - y1 - (k ? 2 : 0)), fill: segs[k].color, rx: 2 }));
+    });
+    svg.append(S('rect', { x: L + bw * i, y: T, width: bw, height: Ht - T - B, fill: 'transparent', 'data-tip': tip }));
+    if (labelAt(i, n)) svg.append(S('text', { x: L + bw * i + bw / 2, y: Ht - 8, 'text-anchor': 'middle', class: 'viz-axis' }, d.label));
+  });
+  return withTip(H('div', { class: 'viz-box' }, svg));
+}
+
 // Säulen je Monat (eine Serie, Spitzenwert beschriftet)
 export function monthBars(data, color = 'var(--viz-1)') {
   const W = 340, Ht = 190, L = 40, B = 26, T = 12, n = data.length;
@@ -97,7 +123,7 @@ export function monthBars(data, color = 'var(--viz-1)') {
 }
 
 // Verlauf (kumuliert) mit gestricheltem Budget als Referenz
-export function cumLine(data, budget, color = 'var(--viz-1)') {
+export function cumLine(data, budget, color = 'var(--viz-1)', unit = 'insgesamt') {
   const W = 340, Ht = 190, L = 40, B = 26, T = 14, R = 10, n = data.length;
   const max = niceMax(Math.max(budget || 0, ...data.map((d) => d.value), 1) * 1.05);
   const x = (i) => L + (n === 1 ? (W - L - R) / 2 : ((W - L - R) * i) / (n - 1));
@@ -108,8 +134,9 @@ export function cumLine(data, budget, color = 'var(--viz-1)') {
   const pts = data.map((d, i) => [x(i), y(d.value)]);
   if (n > 1) svg.append(S('path', { d: `M${pts[0][0]},${Ht - B} ` + pts.map((p) => `L${p[0]},${p[1]}`).join(' ') + ` L${pts[n - 1][0]},${Ht - B} Z`, fill: color, opacity: 0.12 }), S('path', { d: pts.map((p, i) => (i ? 'L' : 'M') + p[0] + ',' + p[1]).join(' '), fill: 'none', stroke: color, 'stroke-width': 2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
   data.forEach((d, i) => {
-    svg.append(S('circle', { cx: pts[i][0], cy: pts[i][1], r: 4, fill: color, stroke: 'var(--viz-surface)', 'stroke-width': 2 }), S('circle', { cx: pts[i][0], cy: pts[i][1], r: 16, fill: 'transparent', 'data-tip': `${d.label}: ${money(d.value)} insgesamt` }));
-    if (n <= 8 || i % 2 === (n - 1) % 2) svg.append(S('text', { x: pts[i][0], y: Ht - 8, 'text-anchor': 'middle', class: 'viz-axis' }, d.label));
+    if (n <= 12) svg.append(S('circle', { cx: pts[i][0], cy: pts[i][1], r: 4, fill: color, stroke: 'var(--viz-surface)', 'stroke-width': 2 }));
+    svg.append(S('circle', { cx: pts[i][0], cy: pts[i][1], r: n > 12 ? 6 : 16, fill: 'transparent', 'data-tip': `${d.label}: ${money(d.value)} ${unit}` }));
+    if (labelAt(i, n)) svg.append(S('text', { x: pts[i][0], y: Ht - 8, 'text-anchor': 'middle', class: 'viz-axis' }, d.label));
   });
   return withTip(H('div', { class: 'viz-box' }, svg));
 }

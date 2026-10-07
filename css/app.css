@@ -333,3 +333,13 @@ body.is-dragging { user-select: none; -webkit-user-select: none; -webkit-touch-c
 .hit:first-child { border-top: 0; }
 .hit .mi { color: var(--muted); margin-top: 2px; }
 .hit-t { min-width: 0; }
+
+/* Finanzierung */
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sub { margin: 14px 0 2px; font-size: .95rem; }
+.ymrow { grid-template-columns: 1fr 1fr 36px; }
+.btnrow { display: flex; gap: 4px; justify-content: space-between; }
+.tablewrap { overflow-x: auto; }
+.viz-table.plan td, .viz-table.plan th { font-size: .82rem; white-space: nowrap; padding: 6px 4px; }
+.viz-table.plan thead th { color: var(--muted); font-weight: 500; text-align: right; }
+.viz-table.plan thead th:first-child, .viz-table.plan tbody th { text-align: left; }

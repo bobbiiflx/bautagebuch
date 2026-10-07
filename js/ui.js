@@ -8,7 +8,8 @@ import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import * as Wx from './weather.js';
-import { donut, stackBar, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
+import { donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
+import * as Fin from './finance.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
 // ---------- Hilfsfunktionen ----------
@@ -494,6 +495,9 @@ function costCharts(all, sums, budget) {
     const segs = [{ label: 'Ausgezahlt', value: sums.subPaid, color: 'var(--viz-3)' }, { label: 'Noch ausstehend', value: sums.subOpen, color: 'var(--viz-4)' }];
     out.push(chartCard('Förderungen', stackBar(segs), legend(segs.map((x) => ({ ...x, text: fmtEUR(x.value) }))), [...segs.map((x) => [x.label, fmtEUR(x.value)]), ['Gesamt', fmtEUR(sums.subPaid + sums.subOpen)]]));
   }
+  return swipeCharts(out);
+}
+function swipeCharts(out) {
   const track = h('div', { class: 'swipe', tabindex: 0, 'aria-label': 'Diagramme, seitlich wischen' }, out);
   const dots = h('div', { class: 'dots' }, out.map((_, i) => h('button', { class: 'dot' + (i ? '' : ' on'), 'aria-label': `Diagramm ${i + 1}`, onclick: () => track.scrollTo({ left: track.clientWidth * i, behavior: 'smooth' }) })));
   track.addEventListener('scroll', () => { const i = Math.round(track.scrollLeft / track.clientWidth); [...dots.children].forEach((d, j) => d.classList.toggle('on', i === j)); }, { passive: true });
@@ -580,6 +584,135 @@ function viewSearch() {
   paint();
   if (!searchQ) setTimeout(() => { if (route() === 'suche') input.focus(); }, 50);
   return h('div', { class: 'view' }, input, out);
+}
+
+// ---------- Ansicht: Finanzierung ----------
+const LOAN_DEFAULT = { name: '', amount: '', rate: '', method: 'annuitaet', repay: 2, start: '', freeYears: 0, fixYears: 10, followRate: '', payouts: [], commitRate: 3, commitFree: 12, specialYearly: '', specialMax: '', specialMonth: 12, specials: [] };
+const loans = () => Store.all('settings').filter((x) => x.kind === 'loan').sort((a, b) => (a.start || '').localeCompare(b.start || '') || (a.name || '').localeCompare(b.name || ''));
+const fmt0 = (n) => (Number(n) || 0).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' €';
+const pct2 = (n) => (Number(n) || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' %';
+const MONTHS = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+
+// Zeilen aus Monat + Betrag (Auszahlungen, Sondertilgungen)
+function ymRows(list, ph) {
+  const box = h('div', { class: 'brows' });
+  const add = (r = {}) => {
+    const ym = h('input', { type: 'month', value: r.ym || '', 'aria-label': 'Monat' });
+    const amt = h('input', { type: 'number', class: 'pamt', step: '500', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: r.amount ?? '', 'aria-label': 'Betrag' });
+    const row = h('div', { class: 'prow ymrow' }, ym, amt, h('button', { type: 'button', class: 'mv', 'aria-label': 'Entfernen', onclick: () => row.remove() }, icon('close', { size: 18 })));
+    box.append(row);
+  };
+  list.forEach(add);
+  return { el: [box, h('button', { type: 'button', class: 'btn small', onclick: () => add() }, icon('add', { size: 18 }), ' ' + ph)], get: () => [...box.querySelectorAll('.ymrow')].map((r) => ({ ym: r.querySelector('input[type=month]').value, amount: Number(r.querySelector('.pamt').value) || 0 })).filter((x) => x.ym && x.amount > 0) };
+}
+
+function loanForm(entry) {
+  const e = { ...LOAN_DEFAULT, ...(entry || {}), kind: 'loan' };
+  const num = (v, o = {}) => h('input', { type: 'number', inputmode: 'decimal', step: o.step || '0.01', min: o.min ?? '0', value: v ?? '', placeholder: o.ph || '' });
+  const name = h('input', { type: 'text', required: true, value: e.name, placeholder: 'z. B. Bankdarlehen, KfW, Familie', list: 'loan-names' });
+  const dl = h('datalist', { id: 'loan-names' }, ['Bankdarlehen', 'KfW-Darlehen', 'Bausparvertrag', 'Darlehen Familie'].map((n) => h('option', { value: n })));
+  const amount = num(e.amount, { step: '1000', ph: 'EUR' });
+  const rate = num(e.rate, { ph: 'z. B. 3,6' });
+  const method = h('select', { value: e.method }, h('option', { value: 'annuitaet', selected: e.method === 'annuitaet' }, 'Annuität (feste Rate)'), h('option', { value: 'rate', selected: e.method === 'rate' }, 'Ratentilgung (feste Tilgung)'));
+  const repay = num(e.repay, { ph: 'z. B. 2' });
+  const start = h('input', { type: 'month', value: e.start || '' });
+  const freeYears = num(e.freeYears, { step: '0.5' });
+  const fixYears = num(e.fixYears, { step: '1', ph: '0 = bis zum Ende' });
+  const follow = num(e.followRate, { ph: 'leer = gleicher Zins' });
+  const payouts = ymRows(e.payouts || [], 'Auszahlung hinzufügen');
+  const commitRate = num(e.commitRate, { step: '0.05' });
+  const commitFree = num(e.commitFree, { step: '1' });
+  const syear = num(e.specialYearly, { step: '500', ph: 'EUR pro Jahr' });
+  const smax = num(e.specialMax, { step: '500', ph: 'EUR pro Jahr' });
+  const smonth = h('select', { value: String(e.specialMonth) }, MONTHS.map((m, i) => h('option', { value: String(i + 1), selected: Number(e.specialMonth) === i + 1 }, m)));
+  const specials = ymRows(e.specials || [], 'Einmalige Sondertilgung');
+  const read = () => ({ ...e, name: name.value.trim() || 'Darlehen', amount: Number(amount.value) || 0, rate: Number(rate.value) || 0, method: method.value, repay: Number(repay.value) || 0, start: start.value, freeYears: Number(freeYears.value) || 0, fixYears: Number(fixYears.value) || 0, followRate: follow.value === '' ? '' : Number(follow.value), payouts: payouts.get(), commitRate: Number(commitRate.value) || 0, commitFree: Number(commitFree.value) || 0, specialYearly: Number(syear.value) || 0, specialMax: Number(smax.value) || 0, specialMonth: Number(smonth.value) || 12, specials: specials.get() });
+  const preview = h('div', { class: 'note' });
+  const upd = () => {
+    const L = read();
+    if (!(L.amount > 0) || !L.start) { preview.textContent = 'Betrag und Beginn eintragen, dann erscheint die Vorschau.'; return; }
+    const r = Fin.summarize(L);
+    preview.replaceChildren(h('div', {}, h('strong', {}, `Rate ${fmtEUR(r.payment)}`), ` · Laufzeit bis ${r.endYm ? Fin.fmtYm(r.endYm) : 'über 60 Jahre'}`), h('div', {}, `Zinsen gesamt ${fmtEUR(r.interest)}`, r.saved > 0 ? ` · durch Sondertilgung ${fmtEUR(r.saved)} gespart` : ''));
+  };
+  const groups = [];
+  const form = [
+    field('Bezeichnung', name), dl, field('Darlehensbetrag (EUR)', amount),
+    h('div', { class: 'two' }, field('Sollzins (% p. a.)', rate), field('Anfangstilgung (% p. a.)', repay)),
+    field('Tilgungsart', method),
+    field('Beginn (erste Rate)', start),
+    h('div', { class: 'two' }, field('Tilgungsfrei (Jahre)', freeYears, 'nur Zinsen, z. B. in der Bauphase'), field('Zinsbindung (Jahre)', fixYears)),
+    field('Anschlusszins (% p. a.)', follow, 'gilt nach Ende der Zinsbindung; die Rate bleibt gleich'),
+    h('h4', { class: 'sub' }, 'Auszahlung in Raten (optional)'),
+    h('p', { class: 'muted small' }, 'Ohne Eintrag wird der ganze Betrag zum Beginn ausgezahlt. Mit Raten zahlst du Zinsen nur auf das abgerufene Geld, Tilgung startet nach der letzten Auszahlung.'),
+    ...payouts.el,
+    h('div', { class: 'two' }, field('Bereitstellungszins (% p. a.)', commitRate), field('Bereitstellungsfrei (Monate)', commitFree)),
+    h('h4', { class: 'sub' }, 'Sondertilgung'),
+    h('div', { class: 'two' }, field('Geplant pro Jahr (EUR)', syear), field('Im Monat', smonth)),
+    field('Erlaubt pro Jahr (EUR)', smax, 'leer = unbegrenzt; Höchstbetrag laut Vertrag'),
+    ...specials.el,
+    preview,
+  ];
+  void groups;
+  sheet(entry ? 'Darlehen bearbeiten' : 'Neues Darlehen', form, {
+    onSave: () => Store.save('settings', read()),
+    onDelete: entry && (() => Store.remove('settings', e.id)),
+  });
+  sheetEl_listen(form, upd);
+  upd();
+}
+const sheetEl_listen = (form, fn) => { document.querySelector('dialog[open]')?.addEventListener('input', fn); document.querySelector('dialog[open]')?.addEventListener('change', fn); };
+
+function downloadPlan(L, plan) {
+  const head = ['Monat', 'Zinsen', 'Bereitstellung', 'Tilgung', 'Sondertilgung', 'Rate', 'Restschuld'];
+  const f = (n) => n.toFixed(2).replace('.', ',');
+  const rows = plan.rows.map((r) => [r.ym, f(r.interest), f(r.fee), f(r.principal), f(r.special), f(r.payment), f(r.balance)]);
+  download(`tilgungsplan-${(L.name || 'darlehen').toLowerCase().replace(/[^a-z0-9]+/g, '-')}.csv`, '﻿' + [head, ...rows].map((r) => r.join(';')).join('\n'), 'text/csv');
+}
+
+const openLoans = new Set();
+function viewFinance() {
+  const list = loans();
+  if (!list.length) return h('div', { class: 'view' }, empty('Noch kein Darlehen', 'Lege Darlehen mit Zins, Tilgung, Sondertilgung und Auszahlung an – die App rechnet den Tilgungsplan.'), fab(() => loanForm()));
+  const res = list.map((L) => ({ L, r: Fin.summarize(L) }));
+  const plans = res.map((x) => x.r.plan);
+  const total = sum(list, (L) => L.amount);
+  const nowBal = sum(res, (x) => x.r.nowBalance);
+  const interest = sum(res, (x) => x.r.interest);
+  const rateNow = sum(res, (x) => (x.r.plan.rows.find((row) => row.ym === Fin.nowYm()) || x.r.plan.rows.find((row) => row.principal > 0) || { payment: 0 }).payment);
+  const ends = res.map((x) => x.r.endYm).filter(Boolean).sort();
+  const end = ends.length === res.length ? ends[ends.length - 1] : null;
+  const years = Fin.yearly(plans);
+  const kreditBudget = sum(budgetParts().filter((p) => /kredit|darlehen/i.test(p.name)), (p) => p.amount);
+
+  const stats = h('div', { class: 'stats' },
+    stat('Darlehen gesamt', fmtEUR(total), kreditBudget ? (Math.abs(kreditBudget - total) < 1 ? 'passt zum Budgetteil' : `Budgetteil Kredit: ${fmtEUR(kreditBudget)}`) : null, kreditBudget && Math.abs(kreditBudget - total) >= 1 ? 'warn' : ''),
+    stat('Monatliche Rate', fmtEUR(rateNow), 'aktuell, alle Darlehen'),
+    stat('Restschuld heute', fmtEUR(nowBal)),
+    stat('Schuldenfrei', end ? Fin.fmtYm(end) : '–', `Zinsen gesamt ${fmtEUR(interest)}`));
+
+  const out = [];
+  out.push(chartCard('Restschuld im Verlauf', cumLine(years.map((y) => ({ label: y.year, value: y.balance })), null, 'var(--viz-1)', 'Restschuld'), legend([{ label: 'Restschuld (Jahresende)', color: 'var(--viz-1)', text: fmtEUR(total) + ' zu Beginn' }]), years.map((y) => [y.year, fmtEUR(y.balance)])));
+  const segs = [{ label: 'Zinsen', color: 'var(--viz-2)' }, { label: 'Tilgung', color: 'var(--viz-1)' }, { label: 'Sondertilgung', color: 'var(--viz-3)' }];
+  out.push(chartCard('Zinsen und Tilgung je Jahr', stackBars(years.map((y) => ({ label: y.year, vals: [y.interest, y.principal, y.special] })), segs), legend(segs.map((sg, k) => ({ ...sg, text: fmtEUR(sum(years, (y) => [y.interest, y.principal, y.special][k])) }))), years.map((y) => [y.year, `Zinsen ${fmtEUR(y.interest)} · Tilgung ${fmtEUR(y.principal)}${y.special ? ' · Sonder ' + fmtEUR(y.special) : ''}`])));
+
+  const cards = res.map(({ L, r }) => {
+    const open = openLoans.has(L.id);
+    const yrs = Fin.yearly([r.plan]);
+    return h('article', { class: 'card loan' },
+      h('div', { class: 'split', onclick: () => loanForm(L) }, h('h3', {}, L.name), h('strong', { class: 'amount' }, fmtEUR(L.amount))),
+      h('div', { class: 'muted small', onclick: () => loanForm(L) }, `${pct2(L.rate)} Zins · ${L.method === 'rate' ? 'Ratentilgung' : 'Annuität'} ${pct2(L.repay)} · Rate ${fmtEUR(r.payment)}`),
+      h('div', { class: 'muted small', onclick: () => loanForm(L) }, `bis ${r.endYm ? Fin.fmtYm(r.endYm) : '–'} · Zinsen ${fmtEUR(r.interest)} · ${(L.start || '') > Fin.nowYm() ? 'Beginn ' + Fin.fmtYm(L.start) : 'Restschuld heute ' + fmtEUR(r.nowBalance)}`),
+      L.fixYears > 0 && r.fixBalance != null && h('div', { class: 'muted small' }, `Restschuld nach ${L.fixYears} Jahren Zinsbindung: ${fmtEUR(r.fixBalance)}`),
+      r.saved > 0 && h('div', {}, chip(`Sondertilgung spart ${fmtEUR(r.saved)} Zinsen und ${r.monthsSaved >= 12 ? Math.floor(r.monthsSaved / 12) + ' J ' : ''}${r.monthsSaved % 12} Mon.`, 'done')),
+      h('div', { class: 'btnrow' },
+        h('button', { class: 'btn-text small', 'aria-expanded': String(open), onclick: () => { open ? openLoans.delete(L.id) : openLoans.add(L.id); render(); } }, icon(open ? 'expand_less' : 'expand_more', { size: 20 }), ' Tilgungsplan'),
+        h('button', { class: 'btn-text small', onclick: () => downloadPlan(L, r.plan) }, icon('table_chart', { size: 18 }), ' CSV')),
+      open && h('div', { class: 'tablewrap' }, h('table', { class: 'viz-table plan' },
+        h('thead', {}, h('tr', {}, ['Jahr', 'Zinsen', 'Tilgung', 'Sonder', 'Rest'].map((t) => h('th', { scope: 'col' }, t)))),
+        h('tbody', {}, yrs.map((y) => h('tr', {}, h('th', { scope: 'row' }, y.year), h('td', {}, fmt0(y.interest)), h('td', {}, fmt0(y.principal)), h('td', {}, y.special ? fmt0(y.special) : '–'), h('td', {}, fmt0(y.balance)))))))
+    );
+  });
+  return h('div', { class: 'view' }, stats, swipeCharts(out), cards, fab(() => loanForm()));
 }
 
 // ---------- Ansicht: Mängel ----------
@@ -1024,11 +1157,12 @@ const ROUTES = {
   aufgaben: ['Aufgaben', viewTodos],
   planung: ['Planung', viewPlan],
   dokumente: ['Dokumente', viewDocs],
+  finanzierung: ['Finanzierung', viewFinance],
   suche: ['Suche', viewSearch],
   einstellungen: ['Einstellungen', viewSettings],
   haus: ['3D-Haus', () => hausView(phases())],
 };
-const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['maengel', 'warning', 'Mängel']];
+const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['finanzierung', 'account_balance', 'Finanzierung'], ['maengel', 'warning', 'Mängel']];
 const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
 
 const ALL = [...NAV_, ...MORE_];
