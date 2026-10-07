@@ -18,7 +18,8 @@ export const DEFAULT_PHASES = [
   { id: 'kueche', name: 'Küche' },
   { id: 'solar', name: 'Solar' },
   { id: 'aussentreppe', name: 'Außentreppe' },
-].map((p, i) => ({ ...p, order: (i + 1) * 10, state: 'geplant', progress: 0, start: '', end: '', note: '' }));
+  { id: 'baum', name: 'Baum fällen', order: 5 },   // kommt vor allen anderen Phasen
+].map((p, i) => ({ ...p, order: p.order ?? (i + 1) * 10, state: 'geplant', progress: 0, start: '', end: '', note: '' }));
 
 export const PHASE_STATES = [
   ['geplant', 'Geplant'],

@@ -22,6 +22,9 @@ const C = {
   panel: 0x2a4a9a, panelFrame: 0xd9dfe6, screed: 0xbdbfc2, partOld: 0xdca17a, partNew: 0xf4f1ea, tank: 0xe0553f, pipeB: 0x3f93ea, pipeR: 0xea4d3f,
   fbh: 0xf59a2b, copper: 0xeaaa3c, gable: 0xeadcc0,
 };
+// Hoher Laubbaum an der Südostseite des Bestands (Gartenseite, nahe der hinteren Ostwand)
+export const TREE_POS = [-3.6, 0, -9.2];
+export const TREE = { stump: 0.5, logs: 4, logLen: 1.55, r0: 0.4, r1: 0.2 };
 const PASTELS = [0xbfe9d3, 0xf9d9a6, 0xcfdcf6, 0xf6c6d0, 0xe5f2b0, 0xdccbf2, 0xb9e4ec, 0xf8ea9f];
 
 const geoCache = new Map();
@@ -148,6 +151,27 @@ export function buildHouse(engine) {
       g.at(x, 0, z).size(s); return g;
     };
     terrain.add(oak(-17.5, -6, 1.1), oak(16.5, -4.5, 1.0, 0x6ac765), oak(-12.5, 12.5, 0.8));
+    // Hoher Baum (Stamm in Stücken, Krone aus Kugeln – die Animation sägt ihn später genau an diesen Teilen auseinander)
+    {
+      const tree = grp('hoherBaum'); tree.logs = []; tree.blobs = [];
+      for (let i = 0; i < TREE.logs; i++) {
+        const y0 = TREE.stump + i * TREE.logLen, f0 = i / TREE.logs, f1 = (i + 1) / TREE.logs;
+        const rb = lerp(TREE.r0, TREE.r1, f0), rt = lerp(TREE.r0, TREE.r1, f1);
+        const lg = cylN(rt, rb, TREE.logLen, i % 2 ? 0x7a4f33 : 0x86583a, 7, { shadow: true }); lg.at(0, y0 + TREE.logLen / 2, 0); lg.rest = [0, lg.pos[1], 0];
+        tree.add(lg); tree.logs.push(lg);
+      }
+      [[0.2, 6.3, 0.0, 2.0], [-0.6, 7.2, 0.9, 1.5], [0.6, 7.0, -1.0, 1.6], [0.0, 8.5, 0.2, 1.5], [-0.5, 9.4, -0.3, 1.1], [0.7, 5.8, 1.4, 1.3], [-0.7, 5.7, -1.4, 1.3], [0.5, 8.0, 1.1, 1.1], [-0.4, 8.2, -1.2, 1.1]].forEach(([dx, y, dz, r], i) => {
+        const b = new Node(G.sphere(r, 6, 4), { color: hex([0x4fae52, 0x5fbf5a, 0x6ac765][i % 3]), shadow: true }).at(dx, y, dz);
+        b.rest = [dx, y, dz]; tree.add(b); tree.blobs.push(b);
+      });
+      tree.at(TREE_POS[0], 0, TREE_POS[2]);
+      const stump = grp('baumstumpf');
+      stump.add(cylN(0.4, 0.52, TREE.stump, 0x7a4f33, 7, { shadow: true }).at(0, TREE.stump / 2, 0));
+      const cut = cylN(0.37, 0.37, 0.05, 0xe3c48f, 7).at(0, TREE.stump + 0.01, 0); cut.visible = false; stump.cut = cut; stump.add(cut);
+      stump.at(TREE_POS[0], 0, TREE_POS[2]);
+      terrain.add(tree, stump);
+      parts.tree = tree; parts.stump = stump;
+    }
     const shed = grp('gartenhaus').at(-13, 0, -7).rotate(0, 0.25, 0);
     shed.add(box(2.6, 2.0, 2.0, 0xc9a46a, { shadow: true }).at(0, 1.0, 0), box(0.7, 1.5, 0.06, 0x7a4f33).at(-0.5, 0.75, 1.03), box(0.7, 0.5, 0.06, 0x9fe0f7, { outline: false }).at(0.65, 1.25, 1.03));
     const rf = box(3.0, 0.1, 1.35, 0x6b5a4e, { shadow: true }); rf.at(0, 2.35, 0.55).rotate(0.42, 0, 0);
@@ -722,6 +746,9 @@ export function buildHouse(engine) {
       n.pos[1] = n.base + n.scale[1] / 2;
       setCol(n, n.idx < nPaint ? PASTELS[n.idx % PASTELS.length] : C.partNew);
     });
+    const baumWeg = P('baum') >= 0.1;
+    parts.tree.visible = !baumWeg && !state.treeHidden;
+    parts.stump.cut.visible = baumWeg || !!state.stumpCut;
     interior.tank.visible = ot < 1 && !state.tankHidden;
     interior.tankFloor.emissive = ot >= 1 ? 0.5 : 0;
     setCol(interior.tankFloor, ot >= 1 ? 0xe4eaee : 0x80858a);

@@ -1,7 +1,7 @@
 // Bauphasen-Animationen mit Figuren und Fahrzeugen. Vor dem Start steht das Haus im Zustand "vorher" (Phase = 0 %);
 // am Ende setzt der Aufrufer den echten Zustand. ctx = { engine, house, fx, speed, real }.
 import { Node, G, hex, ease, lerp } from './mini3d.js';
-import { DIM } from './haus.js';
+import { DIM, TREE_POS, TREE } from './haus.js';
 import * as A from './actors.js';
 const { makeWorker, setPose, walkPose, POSES, faceDir, makeSkipTruck, makeContainer, makeBoxTruck, makeVan, makeWindowFrame, makePanel, makeTorch, spinWheels, LOOKS, bx, cy, sp, grp } = A;
 
@@ -1735,7 +1735,138 @@ async function aussentreppe(ctx) {
   await Promise.all([driveTo(crane, [48, STREET_Y, zRow], 3000, ease.in), driveTo(truck, [-48, STREET_Y, zRow], 3000, ease.in)]);
 }
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler, boeden, kueche, aussentreppe };
+
+// ---------- Baum fällen ----------
+const makeChainsaw = () => {
+  const g = grp('kettensaege');
+  g.add(bx(0.34, 0.2, 0.17, 0xff7a1a).at(0, 0, 0), bx(0.1, 0.12, 0.2, 0x2b2e34).at(-0.2, 0.08, 0), bx(0.6, 0.07, 0.04, 0xc7ced4, { outline: false }).at(0.48, -0.02, 0), bx(0.6, 0.02, 0.06, 0x3a3f46, { outline: false }).at(0.48, -0.02, 0));
+  return g;
+};
+async function baum(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const tree = house.parts.tree, stump = house.parts.stump;
+  const [tx, , tz] = TREE_POS;
+  const dl = Math.hypot(-0.35, -1), D = [-0.35 / dl, -1 / dl];            // Fallrichtung: in den Garten (Südost), weg vom Haus
+  const Zw = [-D[1], D[0]];                                               // Querrichtung des liegenden Baums
+  const along = (d, side = 0) => [tx + D[0] * d + Zw[0] * side, null, tz + D[1] * d + Zw[1] * side];
+  const yaw = Math.atan2(-D[1], D[0]);
+  const outside = new Node(null); fx.add(outside);
+  house.setView('aussen');
+  const wood = 0xd9b77e, leaf = 0x5fbf5a;
+  const saw = makeChainsaw();
+  let cutter = null;
+  try {
+    // 1) Transporter hält an der Straße, der Holzfäller steigt aus
+    engine.flyTo({ az: 0.25, el: 0.3, r: 38, target: [3, 2.5, 8] }, S(1300));
+    const van = makeVan(0x6a8f3c, 0xf4f1ea); van.at(-14, STREET_Y, 15.4); outside.add(van);
+    await driveTo(van, [10.5, STREET_Y, 15.4], 2200, ease.out, false);
+    cutter = mk({ skin: 0xf0b98d, hair: 0x6b4a2a, shirt: 0xb8382f, pants: 0x3a4a5e, vest: 0xff7a1a, helmet: 0xff7a1a }, 12.4, STREET_Y, 13.9, outside);
+    cutter.hold.add(saw); saw.at(0.1, -0.05, 0).rotate(0, 0, 0);
+    setPose(cutter, POSES.carry);
+    await wait(300);
+
+    // 2) Er geht an der Westseite ums Haus in den Garten zum Baum
+    engine.flyTo({ az: Math.PI + 0.55, el: 0.3, r: 27, target: [-3, 3, -7] }, S(2600));
+    const base = along(-1.25);
+    await walkTo(cutter, [12.2, null, 9.5], { speed: 5.5, carry: true });
+    await walkTo(cutter, [12.2, null, -9.2], { speed: 6, carry: true });
+    await walkTo(cutter, [base[0], null, base[2]], { speed: 5, carry: true });
+    faceDir(cutter.root, D[0], D[1]);
+    van.visible = false;
+
+    // 3) Fallkerbe und Fällschnitt mit der Kettensäge
+    setPose(cutter, { ...POSES.torch, lean: 0.2, lArm: 1.2, lEl: 0.5 });
+    saw.rot[1] = 0;
+    const sawAt = [tx - D[0] * 0.35, 0.95, tz - D[1] * 0.35];
+    await tw(1800, (t) => {
+      saw.rot[2] = Math.sin(t * 90) * 0.02;
+      setPose(cutter, { rArm: 1.25 + Math.sin(t * 50) * 0.03, rEl: 0.25, lArm: 1.15, lEl: 0.3, lean: 0.2, lLeg: 0.15, rLeg: -0.25, nod: 0.3 });
+      if (Math.random() < 0.6) burst(sawAt, 3, wood, 2.6, 350, 0.12);
+    });
+    saw.rot[2] = 0;
+    // zurücktreten
+    await walkTo(cutter, [tx - D[0] * 3.4 + Zw[0] * 2.4, null, tz - D[1] * 3.4 + Zw[1] * 2.4], { speed: 3, carry: true });
+    faceDir(cutter.root, D[0], D[1]);
+    setPose(cutter, POSES.point);
+    cutter.hold.remove(saw); fx.add(saw); saw.at(tx - D[0] * 3.3 + Zw[0] * 2.8, 0.1, tz - D[1] * 3.3 + Zw[1] * 2.8);
+
+    // 4) Der Baum knarzt, kippt und fällt in den Garten
+    tree.rot[1] = yaw;
+    await tw(900, (t) => { tree.rot[2] = -Math.sin(t * 24) * 0.035 * t; });
+    const tip = (a) => [tx + D[0] * Math.sin(a) * 8, Math.cos(a) * 8, tz + D[1] * Math.sin(a) * 8];
+    await tw(2000, (t) => {
+      const a = Math.PI / 2 * t * t;           // beschleunigt
+      tree.rot[2] = -a;
+      tree.pos[1] = 0.42 * Math.sin(Math.min(1, a / (Math.PI / 2)) * Math.PI / 2);
+      if (Math.random() < 0.5 && t > 0.3) burst(tip(a), 2, leaf, 2.2, 600, 0.1);
+    }, ease.linear);
+    tree.rot[2] = -Math.PI / 2;
+    const hit = along(6.5);
+    burst([hit[0], 0.5, hit[2]], 30, leaf, 6, 900, 0.18); puff([hit[0], 0.3, hit[2]], 8, 0.9);
+    await tw(420, (t) => { tree.pos[1] = 0.42 + Math.sin(t * Math.PI) * 0.22; tree.rot[2] = -Math.PI / 2 + Math.sin(t * Math.PI) * 0.06; }, ease.linear);
+    tree.pos[1] = 0.42; tree.rot[2] = -Math.PI / 2;
+    stump.cut.visible = true; house.state.stumpCut = true;
+    await wait(500);
+    setPose(cutter, POSES.thumbs);
+    await wait(500);
+
+    // 5) Zersägen: erst die Äste der Krone, dann der Stamm von oben nach unten
+    cutter.hold.add(saw); saw.at(0.1, -0.05, 0);
+    const walkAlong = (d, side = 1.5, sp = 3.4) => { const p = along(d, side); return walkTo(cutter, [p[0], null, p[2]], { speed: sp, carry: true }); };
+    const sawing = async (d, ms = 700, at = null) => {
+      faceDir(cutter.root, -Zw[0], -Zw[1]);
+      const pt = at || [...along(d, 0.5)];
+      await tw(ms, (t) => {
+        setPose(cutter, { rArm: 1.25 + Math.sin(t * 50) * 0.03, rEl: 0.25, lArm: 1.1, lEl: 0.3, lean: 0.25, lLeg: 0.15, rLeg: -0.25, nod: 0.3 });
+        if (Math.random() < 0.7) burst([pt[0], 0.7, pt[2]], 3, Math.random() < 0.5 ? wood : leaf, 2.6, 350, 0.12);
+      });
+    };
+    const poof = (node, wp, ms = 520) => tw(ms, (t) => { node.size(1 - ease.in(t)); node.pos[2] = node.rest[2] + t * 0.8; }, ease.linear).then(() => { node.visible = false; puff(wp, 4, 0.7); });
+    const blobs = [...tree.blobs].sort((a, b) => a.rest[1] - b.rest[1]);
+    const pend = [];
+    for (let k = 0; k < blobs.length; k += 3) {
+      const grpB = blobs.slice(k, k + 3);
+      const d = grpB.reduce((m, b) => m + b.rest[1], 0) / grpB.length;
+      await walkAlong(Math.min(d, 7.6), 1.9, 5);
+      await sawing(d, 650, [...along(d, 0)]);
+      for (const b of grpB) { const wp = along(b.rest[1], b.rest[2]); pend.push(poof(b, [wp[0], 0.6, wp[2]])); await wait(90); }
+      await wait(150);
+    }
+    await Promise.all(pend);
+    const logs = [...tree.logs].reverse();
+    for (let i = 0; i < logs.length; i++) {
+      const lg = logs[i], d = lg.rest[1] - TREE.logLen / 2;
+      if (i < logs.length - 1) { await walkAlong(d, 1.5, 5); await sawing(d, 650); }
+      else await walkAlong(d + 0.7, 1.5, 5);
+      const wp = along(lg.rest[1]);
+      if (i === logs.length - 1) await sawing(d + TREE.logLen / 2, 600);
+      await poof(lg, [wp[0], 0.6, wp[2]], 520);
+    }
+    tree.visible = false; house.state.treeHidden = true;
+    cutter.hold.remove(saw);
+    setPose(cutter, POSES.wave(0));
+    await tw(1000, (t) => setPose(cutter, POSES.wave(t * 3)));
+
+    // 6) Holzfäller geht zum Transporter zurück, der fährt weg
+    van.visible = true;
+    engine.flyTo({ az: 0.25, el: 0.3, r: 38, target: [3, 2.5, 8] }, S(1400));
+    await walkTo(cutter, [12.2, null, -9.2], { speed: 6.5 });
+    await walkTo(cutter, [12.2, null, 9.5], { speed: 6.5 });
+    await walkTo(cutter, [12.4, null, 13.9], { speed: 5 });
+    cutter.root.visible = false;
+    await driveTo(van, [48, STREET_Y, 15.4], 2800, ease.in, false);
+  } finally {
+    tree.rot[1] = 0; tree.rot[2] = 0; tree.pos[1] = 0;
+    tree.logs.forEach((l) => { l.size(1); l.pos[2] = l.rest[2]; l.visible = true; });
+    tree.blobs.forEach((b) => { b.size(1); b.pos[2] = b.rest[2]; b.visible = true; });
+    house.state.treeHidden = false; house.state.stumpCut = false;
+    tree.visible = true;
+  }
+}
+
+export const ANIMS = { baum, oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler, boeden, kueche, aussentreppe };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
