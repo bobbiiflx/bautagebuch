@@ -5,7 +5,8 @@ import * as Session from './session.js';
 import { Remote } from './onedrive.js';
 import { CONFIG } from './config.js';
 import { hausView } from './haus-view.js';
-import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS } from './phases.js';
+import { icon } from './icons.js';
+import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
 // ---------- Hilfsfunktionen ----------
 export function h(tag, props = {}, ...kids) {
@@ -15,6 +16,7 @@ export function h(tag, props = {}, ...kids) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
     else if (k === 'value') value = v;
+    else if (k === 'style' && typeof v === 'object') Object.assign(el.style, v);
     else if (k.startsWith('on') && typeof v === 'function') el.addEventListener(k.slice(2).toLowerCase(), v);
     else if (k === 'checked' || k === 'selected' || k === 'disabled') el[k] = !!v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -38,7 +40,10 @@ const byDateDesc = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.up
 
 export const phases = () => Store.all('phases').sort((a, b) => a.order - b.order);
 const phaseById = (id) => Store.get('phases', id);
-const phaseName = (id) => phaseById(id)?.name || '';
+const customTrades = () => Store.get('settings', 'trades')?.list || [];
+const tradeOptions = () => [...BUILTIN_TRADES.map(([id, name]) => ({ id, name })), ...customTrades()];
+const usageById = (id) => phaseById(id) || tradeOptions().find((t) => t.id === id);
+const phaseName = (id) => usageById(id)?.name || '';
 
 let toastTimer;
 export function toast(msg, ms = 3500) {
@@ -125,6 +130,39 @@ const field = (label, input, hint) =>
 const optionList = (pairs, value) => pairs.map(([v, t]) => h('option', { value: v, selected: v === value }, t));
 const phaseSelect = (value, none = '– keine Zuordnung –') =>
   h('select', { value: value || '' }, h('option', { value: '' }, none), phases().map((p) => h('option', { value: p.id }, p.name)));
+// Gewerk / Verwendung: Bauphasen, feste Zusätze (Material, Planung, Werkzeug) und eigene Gewerke
+const usageSelect = (value, none = '– keine Zuordnung –') => {
+  const sel = h('select', { value: value || '' },
+    h('option', { value: '' }, none),
+    h('optgroup', { label: 'Bauphasen' }, phases().map((p) => h('option', { value: p.id }, p.name))),
+    h('optgroup', { label: 'Weitere Verwendung' }, tradeOptions().map((t) => h('option', { value: t.id }, t.name))),
+    h('option', { value: '__new' }, '+ Eigenes Gewerk anlegen …'));
+  sel.value = value || '';
+  let prev = sel.value;
+  sel.addEventListener('change', () => { if (sel.value === '__new') tradeForm(null, (id) => { sel.value = id; prev = id; }, () => { sel.value = prev; }); else prev = sel.value; });
+  return sel;
+};
+function tradeForm(trade, onDone, onCancel) {
+  const name = h('input', { type: 'text', required: true, placeholder: 'z. B. Gartenbau', value: trade?.name || '' });
+  sheet(trade ? 'Gewerk bearbeiten' : 'Eigenes Gewerk', [field('Name', name)], {
+    onSave: async () => {
+      const n = name.value.trim();
+      if (!n) return false;
+      const cur = Store.get('settings', 'trades') || { id: 'trades', list: [] };
+      let list, id = trade?.id;
+      if (trade) list = cur.list.map((t) => (t.id === id ? { ...t, name: n } : t));
+      else { id = 'g:' + Date.now().toString(36); list = [...cur.list, { id, name: n }]; }
+      await Store.save('settings', { ...cur, id: 'trades', list });
+      const sel = onDone;
+      if (sel) { const opt = h('option', { value: id }, n); document.querySelectorAll('select option[value="__new"]').forEach((o) => o.parentNode.insertBefore(opt.cloneNode(true), o)); sel(id); }
+    },
+    onCancel,
+    onDelete: trade && (async () => {
+      const cur = Store.get('settings', 'trades') || { id: 'trades', list: [] };
+      await Store.save('settings', { ...cur, id: 'trades', list: cur.list.filter((t) => t.id !== trade.id) });
+    }),
+  });
+}
 
 // ---------- Fotos ----------
 function thumb(id, { onRemove } = {}) {
@@ -211,9 +249,21 @@ const chip = (text, cls = '') => h('span', { class: 'chip ' + cls }, text);
 const stat = (label, value, sub, cls = '') => h('div', { class: 'stat ' + cls }, h('div', { class: 'stat-v' }, value), h('div', { class: 'stat-l' }, label), sub && h('div', { class: 'stat-s' }, sub));
 const card = (title, ...kids) => h('section', { class: 'card' }, title && h('h3', {}, title), ...kids);
 
-function budgetInfo() {
+function budgetParts() {
   const b = Store.get('settings', 'budget');
-  return b ? Number(b.amount) || 0 : 0;
+  if (!b) return [];
+  if (Array.isArray(b.parts)) return b.parts;
+  return Number(b.amount) > 0 ? [{ id: 'p0', name: 'Gesamtbudget', amount: Number(b.amount) }] : [];
+}
+function budgetInfo() { return sum(budgetParts(), (p) => p.amount); }
+// Summen: Ausgaben brutto, Förderungen (ausgezahlt / noch offen), Netto nach ausgezahlter Förderung
+function costSums(costs = Store.all('costs')) {
+  const real = costs.filter((c) => c.status !== 'angebot');
+  const spent = sum(real, (c) => c.amount);
+  const subs = real.filter((c) => c.subsidy);
+  const subPaid = sum(subs.filter((c) => c.subsidyPaid), (c) => c.subsidyAmount);
+  const subOpen = sum(subs.filter((c) => !c.subsidyPaid), (c) => c.subsidyAmount);
+  return { spent, subPaid, subOpen, net: spent - subPaid, open: sum(costs.filter((c) => c.status === 'offen'), (c) => c.amount), offers: sum(costs.filter((c) => c.status === 'angebot'), (c) => c.amount) };
 }
 
 function viewHome() {
@@ -222,8 +272,7 @@ function viewHome() {
   const done = ph.filter((p) => p.state === 'fertig').length;
   const running = ph.filter((p) => p.state === 'laeuft');
   const costs = Store.all('costs');
-  const spent = sum(costs.filter((c) => c.status !== 'angebot'), (c) => c.amount);
-  const open = sum(costs.filter((c) => c.status === 'offen'), (c) => c.amount);
+  const { net: spent, open } = costSums(costs);
   const budget = budgetInfo();
   const defects = Store.all('defects').filter((d) => d.status === 'offen' || d.status === 'klaerung');
   const todos = Store.all('todos').filter((t) => !t.done).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
@@ -249,7 +298,7 @@ function viewHome() {
     h(
       'div',
       { class: 'stats' },
-      stat('Ausgaben', fmtEUR(spent), budget ? `von ${fmtEUR(budget)} Budget` : 'Budget unter „Kosten“ setzen', budget && spent > budget ? 'bad' : ''),
+      stat('Ausgaben (netto)', fmtEUR(spent), budget ? `von ${fmtEUR(budget)} Budget` : 'Budget unter „Kosten“ festlegen', budget && spent > budget ? 'bad' : ''),
       stat('Offene Rechnungen', fmtEUR(open)),
       stat('Offene Mängel', String(defects.length), defects.length ? 'siehe Mängel' : 'alles gut', defects.length ? 'warn' : ''),
       stat('Offene Aufgaben', String(todos.length))
@@ -314,13 +363,19 @@ function costForm(entry) {
   const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Rechnung Elektro, Abschlag 1', value: e.title });
   const amount = h('input', { type: 'number', required: true, step: '0.01', min: '0', inputmode: 'decimal', value: e.amount });
   const vendor = h('input', { type: 'text', placeholder: 'Firma', value: e.vendor || '' });
-  const phase = phaseSelect(e.phaseId);
+  const phase = usageSelect(e.phaseId);
   const status = h('select', { value: e.status }, optionList(COST_STATES, e.status));
+  const subOn = h('input', { type: 'checkbox', checked: !!e.subsidy });
+  const subAmt = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Förderbetrag (EUR)', value: e.subsidyAmount ?? '' });
+  const subPaid = h('input', { type: 'checkbox', checked: !!e.subsidyPaid });
+  const subBox = h('div', { class: 'subbox' }, field('Förderbetrag (EUR)', subAmt, 'Der Teil dieser Rechnung, der gefördert wird bzw. erstattet wird.'), h('label', { class: 'check' }, subPaid, h('span', {}, 'Förderung bereits ausgezahlt')));
+  subBox.hidden = !subOn.checked;
+  subOn.addEventListener('change', () => { subBox.hidden = !subOn.checked; });
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Phase', phase), field('Status', status), field('Notiz', note), pf.el], {
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el], {
     onSave: async () => {
-      await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, note: note.value.trim(), photos: pf.ids });
+      await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids });
       await pf.commit();
     },
     onCancel: () => pf.cancel(),
@@ -329,29 +384,49 @@ function costForm(entry) {
 }
 
 function budgetForm() {
-  const cur = Store.get('settings', 'budget') || { id: 'budget', amount: '' };
-  const amount = h('input', { type: 'number', step: '100', min: '0', inputmode: 'decimal', value: cur.amount });
-  sheet('Gesamtbudget', [field('Budget (EUR)', amount, 'Dient nur dem Vergleich in der Übersicht.')], {
-    onSave: () => Store.save('settings', { ...cur, id: 'budget', amount: Number(amount.value) || 0 }),
+  const cur = Store.get('settings', 'budget') || { id: 'budget' };
+  const rows = h('div', { class: 'brows' });
+  const dl = h('datalist', { id: 'budget-names' }, BUDGET_SUGGESTIONS.map((n) => h('option', { value: n })));
+  const total = h('strong', {}, '');
+  const upd = () => { total.textContent = fmtEUR(sum([...rows.querySelectorAll('.prow')], (r) => r.querySelector('.pamt').value)); };
+  const addRow = (p = {}) => {
+    const name = h('input', { type: 'text', list: 'budget-names', placeholder: 'z. B. Eigenkapital', value: p.name || '', 'aria-label': 'Bezeichnung' });
+    const amt = h('input', { type: 'number', class: 'pamt', step: '100', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: p.amount ?? '', 'aria-label': 'Betrag', oninput: upd });
+    const row = h('div', { class: 'prow', 'data-id': p.id || 'p' + Date.now().toString(36) + Math.floor(Math.random() * 99) }, name, amt, h('button', { type: 'button', class: 'mv', 'aria-label': 'Teil entfernen', onclick: () => { row.remove(); upd(); } }, '×'));
+    rows.append(row);
+  };
+  const parts = budgetParts();
+  (parts.length ? parts : [{ name: 'Eigenkapital' }, { name: 'Kredit' }]).forEach(addRow);
+  upd();
+  sheet('Budget', [
+    h('p', { class: 'muted small' }, 'Das Budget kann aus mehreren Teilen bestehen, z. B. Eigenkapital, Kredit oder Eigenleistung. Ausgezahlte Förderungen aus den Rechnungen mindern die Ausgaben.'),
+    rows, dl,
+    h('button', { type: 'button', class: 'btn block', onclick: () => addRow() }, '+ Weiteren Teil hinzufügen'),
+    h('div', { class: 'line' }, h('span', {}, 'Gesamt'), total),
+  ], {
+    onSave: () => {
+      const list = [...rows.querySelectorAll('.prow')].map((r) => ({ id: r.dataset.id, name: r.querySelector('input').value.trim(), amount: Number(r.querySelector('.pamt').value) || 0 })).filter((x) => x.name || x.amount);
+      return Store.save('settings', { ...cur, id: 'budget', parts: list.map((x) => ({ ...x, name: x.name || 'Budget' })), amount: sum(list, (x) => x.amount) });
+    },
   });
 }
 
 let costFilter = { phase: '', status: '' };
 function viewCosts() {
   const all = Store.all('costs');
-  const spent = sum(all.filter((c) => c.status !== 'angebot'), (c) => c.amount);
-  const open = sum(all.filter((c) => c.status === 'offen'), (c) => c.amount);
-  const offers = sum(all.filter((c) => c.status === 'angebot'), (c) => c.amount);
+  const { spent, subPaid, subOpen, net, open, offers } = costSums(all);
   const budget = budgetInfo();
+  const parts = budgetParts();
   let list = all.filter((c) => (!costFilter.phase || c.phaseId === costFilter.phase) && (!costFilter.status || c.status === costFilter.status)).sort(byDateDesc);
 
-  const perPhase = phases()
+  const usages = [...phases(), ...tradeOptions()];
+  const perPhase = usages
     .map((p) => ({ p, v: sum(all.filter((c) => c.phaseId === p.id && c.status !== 'angebot'), (c) => c.amount) }))
     .filter((x) => x.v > 0);
-  const other = sum(all.filter((c) => c.status !== 'angebot' && !phaseById(c.phaseId)), (c) => c.amount);
+  const other = sum(all.filter((c) => c.status !== 'angebot' && !usageById(c.phaseId)), (c) => c.amount);
   const max = Math.max(1, ...perPhase.map((x) => x.v), other);
 
-  const fPhase = h('select', { value: costFilter.phase, onchange: (e) => { costFilter.phase = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Phasen'), phases().map((p) => h('option', { value: p.id }, p.name)));
+  const fPhase = h('select', { value: costFilter.phase, onchange: (e) => { costFilter.phase = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Gewerke'), usages.map((p) => h('option', { value: p.id }, p.name)));
   const fStatus = h('select', { value: costFilter.status, onchange: (e) => { costFilter.status = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Status'), optionList(COST_STATES, costFilter.status));
 
   return h(
@@ -360,13 +435,20 @@ function viewCosts() {
     h(
       'div',
       { class: 'stats' },
-      stat('Ausgaben', fmtEUR(spent), budget ? `${fmtEUR(budget - spent)} vom Budget übrig` : null, budget && spent > budget ? 'bad' : ''),
+      stat('Ausgaben (netto)', fmtEUR(net), budget ? `${fmtEUR(budget - net)} vom Budget übrig` : null, budget && net > budget ? 'bad' : ''),
       stat('Davon offen', fmtEUR(open)),
+      stat('Ausgaben brutto', fmtEUR(spent)),
       stat('Angebote', fmtEUR(offers)),
-      h('button', { class: 'stat btn-stat', onclick: budgetForm }, h('div', { class: 'stat-v' }, budget ? fmtEUR(budget) : '–'), h('div', { class: 'stat-l' }, 'Budget (antippen)'))
+      stat('Förderung ausgezahlt', fmtEUR(subPaid)),
+      stat('Förderung ausstehend', fmtEUR(subOpen), subOpen ? 'noch nicht ausgezahlt' : null, subOpen ? 'warn' : '')
     ),
+    h('section', { class: 'card budget', onclick: budgetForm },
+      h('div', { class: 'split' }, h('h3', {}, 'Budget'), h('strong', { class: 'amount' }, budget ? fmtEUR(budget) : '–')),
+      parts.length
+        ? parts.map((p) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(p.amount)), bar(budget ? (p.amount / budget) * 100 : 0)))
+        : h('p', { class: 'muted small' }, 'Antippen, um das Budget festzulegen – auch in mehreren Teilen (Eigenkapital, Kredit …).')),
     perPhase.length || other
-      ? card('Ausgaben je Phase', [...perPhase.map(({ p, v }) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(v)), bar((v / max) * 100))), other ? h('div', { class: 'brow' }, h('span', {}, 'Ohne Zuordnung'), h('span', { class: 'muted' }, fmtEUR(other)), bar((other / max) * 100)) : null])
+      ? card('Ausgaben je Gewerk', [...perPhase.map(({ p, v }) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(v)), bar((v / max) * 100))), other ? h('div', { class: 'brow' }, h('span', {}, 'Ohne Zuordnung'), h('span', { class: 'muted' }, fmtEUR(other)), bar((other / max) * 100)) : null])
       : null,
     h('div', { class: 'filters' }, fPhase, fStatus),
     list.length
@@ -377,6 +459,7 @@ function viewCosts() {
             h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(c.date)), chip(COST_STATES.find((s) => s[0] === c.status)?.[1] || c.status, 'cs-' + c.status)),
             h('div', { class: 'split' }, h('h3', {}, c.title), h('strong', { class: 'amount' }, fmtEUR(c.amount))),
             h('div', { class: 'muted small' }, [c.vendor, phaseName(c.phaseId)].filter(Boolean).join(' · ')),
+            c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
             photoStrip(c.photos)
           )
         )
@@ -392,7 +475,7 @@ function defectForm(entry) {
   const desc = h('textarea', { rows: 4, placeholder: 'Genauere Beschreibung', value: e.description || '' });
   const room = h('input', { type: 'text', list: 'rooms', placeholder: 'Raum / Ort', value: e.room || '' });
   const dl = h('datalist', { id: 'rooms' }, ROOMS.map((r) => h('option', { value: r })));
-  const phase = phaseSelect(e.phaseId, '– Gewerk unbekannt –');
+  const phase = usageSelect(e.phaseId, '– Gewerk unbekannt –');
   const vendor = h('input', { type: 'text', placeholder: 'Verantwortliche Firma', value: e.vendor || '' });
   const status = h('select', { value: e.status }, optionList(DEFECT_STATES, e.status));
   const due = h('input', { type: 'date', value: e.due || '' });
@@ -579,7 +662,7 @@ function docAddForm() {
   const label = h('div', { class: 'hint' }, 'Noch nichts ausgewählt');
   const name = h('input', { type: 'text', required: true, placeholder: 'Bezeichnung' });
   const cat = h('select', {}, DOC_CATEGORIES.map((c) => h('option', { value: c }, c)));
-  const phase = phaseSelect('');
+  const phase = usageSelect('');
   const note = h('textarea', { rows: 3 });
   const pick = (e) => {
     file = e.target.files[0];
@@ -609,7 +692,7 @@ function docAddForm() {
 
 function docEditForm(d) {
   const name = h('input', { type: 'text', required: true, value: d.name });
-  const phase = phaseSelect(d.phaseId);
+  const phase = usageSelect(d.phaseId);
   const note = h('textarea', { rows: 3, value: d.note || '' });
   sheet('Dokument', [h('p', { class: 'muted small' }, `${d.category} · ${fmtSize(d.size || 0)} · ${fmtDate(d.date)}`), field('Bezeichnung', name), field('Gewerk / Phase', phase), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
     onSave: () => Store.save('documents', { ...d, name: name.value.trim(), phaseId: phase.value, note: note.value.trim() }),
@@ -683,6 +766,10 @@ function viewSettings() {
     { class: 'view' },
     card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
+    card('Eigene Gewerke',
+      customTrades().length ? customTrades().map((t) => h('div', { class: 'line', onclick: () => tradeForm(t) }, h('span', {}, t.name), h('span', { class: 'muted small' }, 'bearbeiten'))) : h('p', { class: 'muted small' }, 'Material, Architektur und Planung sowie Werkzeug gibt es schon. Hier kannst du weitere Gewerke oder Verwendungen anlegen.'),
+      h('button', { class: 'btn block', onclick: () => tradeForm(null) }, '+ Eigenes Gewerk')
+    ),
     card('Daten',
       h('button', { class: 'btn block', onclick: () => download(`bautagebuch-sicherung-${today()}.json`, JSON.stringify(Store.exportAll(), null, 2)) }, 'Sicherung herunterladen (JSON)'),
       demoCount
@@ -704,7 +791,7 @@ async function switchTarget(t) {
 
 // ---------- Gemeinsame Bausteine ----------
 const empty = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'empty-i' }, '🏗️'), h('strong', {}, title), h('p', { class: 'muted' }, text));
-const fab = (fn) => h('button', { class: 'fab', 'aria-label': 'Hinzufügen', onclick: fn }, '+');
+const fab = (fn) => h('button', { class: 'fab', 'aria-label': 'Hinzufügen', onclick: fn }, icon('add', { size: 28 }));
 
 function syncBadge() {
   const s = Store.getState();
@@ -725,8 +812,8 @@ const ROUTES = {
   einstellungen: ['Einstellungen', viewSettings],
   haus: ['3D-Haus', () => hausView(phases())],
 };
-const NAV = [['', '🏠', 'Übersicht'], ['haus', '🏡', 'Haus'], ['tagebuch', '📓', 'Tagebuch'], ['kosten', '💶', 'Kosten'], ['maengel', '⚠️', 'Mängel']];
-const MORE = [['aufgaben', '✅', 'Aufgaben'], ['planung', '📅', 'Planung'], ['dokumente', '📁', 'Dokumente'], ['einstellungen', '⚙️', 'Einstellungen']];
+const NAV = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['maengel', 'warning', 'Mängel']];
+const MORE = [['aufgaben', 'task_alt', 'Aufgaben'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
 
 const readHash = () => {
   const r = location.hash.replace(/^#\/?/, '');
@@ -747,7 +834,7 @@ let root, headerSync, mainEl, navEl;
 
 function openMore() {
   const dlg = h('dialog', { class: 'sheet more' },
-    h('div', { class: 'sheet-body' }, MORE.map(([r, ic, t]) => h('a', { class: 'more-item', href: '#/' + r, onclick: navClick(r, () => dlg.close()) }, h('span', {}, ic), t)), h('button', { class: 'btn block', onclick: () => dlg.close() }, 'Schließen')));
+    h('div', { class: 'sheet-body' }, MORE.map(([r, ic, t]) => h('a', { class: 'more-item', href: '#/' + r, onclick: navClick(r, () => dlg.close()) }, icon(ic, { size: 22 }), h('span', {}, t))), h('button', { class: 'btn block', onclick: () => dlg.close() }, 'Schließen')));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
@@ -767,8 +854,8 @@ export function render() {
   headerSync.replaceChildren(syncBadge());
   mainEl.replaceChildren(view());
   navEl.replaceChildren(
-    ...NAV.map(([k, ic, t]) => h('a', { href: '#/' + k, class: r === k ? 'on' : '', onclick: navClick(k) }, h('span', { class: 'ic' }, ic), t)),
-    h('button', { class: MORE.some((m) => m[0] === r) ? 'on' : '', onclick: openMore }, h('span', { class: 'ic' }, '☰'), 'Mehr')
+    ...NAV.map(([k, ic, t]) => h('a', { href: '#/' + k, class: r === k ? 'on' : '', 'aria-label': t, title: t, 'aria-current': r === k ? 'page' : null, onclick: navClick(k) }, h('span', { class: 'ic' }, icon(ic, { filled: r === k, size: 26 })))),
+    h('button', { class: MORE.some((m) => m[0] === r) ? 'on' : '', 'aria-label': 'Mehr', title: 'Mehr', onclick: openMore }, h('span', { class: 'ic' }, icon('more_horiz', { filled: MORE.some((m) => m[0] === r), size: 26 })))
   );
   window.scrollTo(0, y);
 }

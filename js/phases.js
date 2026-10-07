@@ -51,3 +51,11 @@ export const ROOMS = [
   'DG – Balkon',
   'Außen – Fassade', 'Außen – Dach', 'Außen – Außentreppe', 'Außen – Lichtgraben', 'Außen – Garten',
 ];
+
+// Weitere Verwendungen/Gewerke neben den Bauphasen (eigene lassen sich in der App ergänzen).
+export const BUILTIN_TRADES = [
+  ['g:material', 'Material'],
+  ['g:planung', 'Architektur und Planung'],
+  ['g:werkzeug', 'Werkzeug'],
+];
+export const BUDGET_SUGGESTIONS = ['Eigenkapital', 'Kredit', 'Förderung', 'Eigenleistung', 'Darlehen Familie', 'Rücklage'];
