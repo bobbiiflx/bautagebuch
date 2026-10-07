@@ -4,6 +4,7 @@ import * as Session from './session.js';
 import * as UI from './ui.js';
 import { CONFIG } from './config.js';
 import { applyTheme } from './theme.js';
+import { hideSplash } from './splash.js';
 applyTheme();
 
 async function boot() {
@@ -11,6 +12,7 @@ async function boot() {
   try {
     await Store.init();
   } catch (e) {
+    hideSplash(0);
     document.getElementById('app').textContent = 'Der lokale Speicher ist nicht verfügbar (privater Modus?). ' + e.message;
     return;
   }
@@ -32,6 +34,7 @@ async function boot() {
     }
   }
   UI.mount(document.getElementById('app'));
+  hideSplash();
   if (authError) UI.toast('Anmeldung fehlgeschlagen: ' + authError, 9000);
   await Session.start();
 

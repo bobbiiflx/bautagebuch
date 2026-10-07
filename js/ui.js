@@ -7,6 +7,7 @@ import { CONFIG } from './config.js';
 import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
+import { splashOn, setSplash } from './splash.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
@@ -1313,6 +1314,7 @@ function viewSettings() {
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
     card('Standort für das Wetter', locBox()),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
+    card('Startbildschirm', h('label', { class: 'switch-row' }, h('span', {}, 'Startbildschirm beim Öffnen zeigen'), h('input', { type: 'checkbox', role: 'switch', checked: splashOn(), onchange: (e) => setSplash(e.target.checked) })), h('p', { class: 'muted small' }, 'Gilt nur für dieses Gerät. Ein Tipp beendet den Startbildschirm sofort.')),
     card('Eigene Gewerke',
       customTrades().length ? customTrades().map((t) => h('div', { class: 'line', onclick: () => tradeForm(t) }, h('span', {}, t.name), h('span', { class: 'muted small' }, 'bearbeiten'))) : h('p', { class: 'muted small' }, 'Material, Architektur und Planung sowie Werkzeug gibt es schon. Hier kannst du weitere Gewerke oder Verwendungen anlegen.'),
       h('button', { class: 'btn block', onclick: () => tradeForm(null) }, '+ Eigenes Gewerk')
