@@ -343,3 +343,8 @@ body.is-dragging { user-select: none; -webkit-user-select: none; -webkit-touch-c
 .viz-table.plan td, .viz-table.plan th { font-size: .82rem; white-space: nowrap; padding: 6px 4px; }
 .viz-table.plan thead th { color: var(--muted); font-weight: 500; text-align: right; }
 .viz-table.plan thead th:first-child, .viz-table.plan tbody th { text-align: left; }
+
+.brow .bl { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.brow.loanrow { cursor: pointer; }
+.brow.loanrow .bl { color: var(--accent); font-weight: 550; }
+.split .chip { flex: none; }

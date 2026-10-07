@@ -253,12 +253,15 @@ const chip = (text, cls = '') => h('span', { class: 'chip ' + cls }, text);
 const stat = (label, value, sub, cls = '') => h('div', { class: 'stat ' + cls }, h('div', { class: 'stat-v' }, value), h('div', { class: 'stat-l' }, label), sub && h('div', { class: 'stat-s' }, sub));
 const card = (title, ...kids) => h('section', { class: 'card' }, title && h('h3', {}, title), ...kids);
 
-function budgetParts() {
+// Eigene Budgetteile (z. B. Eigenkapital) – die Darlehen aus „Finanzierung“ kommen automatisch dazu
+function manualParts() {
   const b = Store.get('settings', 'budget');
   if (!b) return [];
   if (Array.isArray(b.parts)) return b.parts;
   return Number(b.amount) > 0 ? [{ id: 'p0', name: 'Gesamtbudget', amount: Number(b.amount) }] : [];
 }
+const loanParts = () => Store.all('settings').filter((x) => x.kind === 'loan' && Number(x.amount) > 0).sort((a, b) => (a.start || '').localeCompare(b.start || '')).map((L) => ({ id: 'loan:' + L.id, name: L.name, amount: Number(L.amount), loan: true, planned: !!L.planned }));
+const budgetParts = () => [...manualParts(), ...loanParts()];
 function budgetInfo() { return sum(budgetParts(), (p) => p.amount); }
 // Summen: Ausgaben brutto, Förderungen (ausgezahlt / noch offen), Netto nach ausgezahlter Förderung
 function costSums(costs = Store.all('costs')) {
@@ -415,11 +418,12 @@ function budgetForm() {
     const row = h('div', { class: 'prow', 'data-id': p.id || 'p' + Date.now().toString(36) + Math.floor(Math.random() * 99) }, name, amt, h('button', { type: 'button', class: 'mv', 'aria-label': 'Teil entfernen', onclick: () => { row.remove(); upd(); } }, '×'));
     rows.append(row);
   };
-  const parts = budgetParts();
-  (parts.length ? parts : [{ name: 'Eigenkapital' }, { name: 'Kredit' }]).forEach(addRow);
+  const parts = manualParts();
+  (parts.length ? parts : [{ name: 'Eigenkapital' }]).forEach(addRow);
   upd();
   sheet('Budget', [
-    h('p', { class: 'muted small' }, 'Das Budget kann aus mehreren Teilen bestehen, z. B. Eigenkapital, Kredit oder Eigenleistung. Ausgezahlte Förderungen aus den Rechnungen mindern die Ausgaben.'),
+    h('p', { class: 'muted small' }, 'Hier legst du eigene Budgetteile fest, z. B. Eigenkapital oder Eigenleistung. Darlehen werden automatisch aus „Finanzierung“ übernommen. Ausgezahlte Förderungen aus den Rechnungen mindern die Ausgaben.'),
+    loanParts().length ? h('p', { class: 'muted small' }, 'Darlehen im Budget: ' + loanParts().map((p) => `${p.name} (${fmtEUR(p.amount)})`).join(', ')) : null,
     rows, dl,
     h('button', { type: 'button', class: 'btn block', onclick: () => addRow() }, '+ Weiteren Teil hinzufügen'),
     h('div', { class: 'line' }, h('span', {}, 'Gesamt'), total),
@@ -528,8 +532,10 @@ function viewCosts() {
     h('section', { class: 'card budget', onclick: budgetForm },
       h('div', { class: 'split' }, h('h3', {}, 'Budget'), h('strong', { class: 'amount' }, budget ? fmtEUR(budget) : '–')),
       parts.length
-        ? parts.map((p) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(p.amount)), bar(budget ? (p.amount / budget) * 100 : 0)))
-        : h('p', { class: 'muted small' }, 'Antippen, um das Budget festzulegen – auch in mehreren Teilen (Eigenkapital, Kredit …).')),
+        ? parts.map((p) => h('div', { class: 'brow' + (p.loan ? ' loanrow' : ''), onclick: p.loan ? (ev) => { ev.stopPropagation(); go('finanzierung'); } : null, role: p.loan ? 'link' : null },
+            h('span', { class: 'bl' }, p.loan && icon('account_balance', { size: 18 }), p.name, p.loan && p.planned && chip('geplant', 'cs-angebot')), h('span', { class: 'muted' }, fmtEUR(p.amount)), bar(budget ? (p.amount / budget) * 100 : 0)))
+        : h('p', { class: 'muted small' }, 'Antippen, um das Budget festzulegen (z. B. Eigenkapital). Darlehen kommen aus „Finanzierung“.'),
+      parts.some((p) => p.loan) && h('p', { class: 'muted small' }, 'Darlehen antippen öffnet die Finanzierung.')),
     costCharts(all, sums, budget),
   ];
   const invoices = [
@@ -587,7 +593,7 @@ function viewSearch() {
 }
 
 // ---------- Ansicht: Finanzierung ----------
-const LOAN_DEFAULT = { name: '', amount: '', rate: '', method: 'annuitaet', repay: 2, start: '', freeYears: 0, fixYears: 10, followRate: '', payouts: [], commitRate: 3, commitFree: 12, specialYearly: '', specialMax: '', specialMonth: 12, specials: [] };
+const LOAN_DEFAULT = { planned: false, name: '', amount: '', rate: '', method: 'annuitaet', repay: 2, start: '', freeYears: 0, fixYears: 10, followRate: '', payouts: [], commitRate: 3, commitFree: 12, specialYearly: '', specialMax: '', specialMonth: 12, specials: [] };
 const loans = () => Store.all('settings').filter((x) => x.kind === 'loan').sort((a, b) => (a.start || '').localeCompare(b.start || '') || (a.name || '').localeCompare(b.name || ''));
 const fmt0 = (n) => (Number(n) || 0).toLocaleString('de-DE', { maximumFractionDigits: 0 }) + ' €';
 const pct2 = (n) => (Number(n) || 0).toLocaleString('de-DE', { maximumFractionDigits: 2 }) + ' %';
@@ -626,7 +632,8 @@ function loanForm(entry) {
   const smax = num(e.specialMax, { step: '500', ph: 'EUR pro Jahr' });
   const smonth = h('select', { value: String(e.specialMonth) }, MONTHS.map((m, i) => h('option', { value: String(i + 1), selected: Number(e.specialMonth) === i + 1 }, m)));
   const specials = ymRows(e.specials || [], 'Einmalige Sondertilgung');
-  const read = () => ({ ...e, name: name.value.trim() || 'Darlehen', amount: Number(amount.value) || 0, rate: Number(rate.value) || 0, method: method.value, repay: Number(repay.value) || 0, start: start.value, freeYears: Number(freeYears.value) || 0, fixYears: Number(fixYears.value) || 0, followRate: follow.value === '' ? '' : Number(follow.value), payouts: payouts.get(), commitRate: Number(commitRate.value) || 0, commitFree: Number(commitFree.value) || 0, specialYearly: Number(syear.value) || 0, specialMax: Number(smax.value) || 0, specialMonth: Number(smonth.value) || 12, specials: specials.get() });
+  const read = () => ({ ...e, name: name.value.trim() || 'Darlehen', planned: planned.checked, amount: Number(amount.value) || 0, rate: Number(rate.value) || 0, method: method.value, repay: Number(repay.value) || 0, start: start.value, freeYears: Number(freeYears.value) || 0, fixYears: Number(fixYears.value) || 0, followRate: follow.value === '' ? '' : Number(follow.value), payouts: payouts.get(), commitRate: Number(commitRate.value) || 0, commitFree: Number(commitFree.value) || 0, specialYearly: Number(syear.value) || 0, specialMax: Number(smax.value) || 0, specialMonth: Number(smonth.value) || 12, specials: specials.get() });
+  const planned = h('input', { type: 'checkbox', checked: !!e.planned });
   const preview = h('div', { class: 'note' });
   const upd = () => {
     const L = read();
@@ -636,7 +643,10 @@ function loanForm(entry) {
   };
   const groups = [];
   const form = [
-    field('Bezeichnung', name), dl, field('Darlehensbetrag (EUR)', amount),
+    field('Bezeichnung', name), dl,
+    h('label', { class: 'check' }, planned, h('span', {}, 'Nur zum Budgetieren (noch kein Vertrag)')),
+    h('p', { class: 'muted small' }, 'Geplante Darlehen rechnen im Budget und im Tilgungsplan mit, sind aber als Planspiel markiert – z. B. um Varianten durchzurechnen.'),
+    field('Darlehensbetrag (EUR)', amount),
     h('div', { class: 'two' }, field('Sollzins (% p. a.)', rate), field('Anfangstilgung (% p. a.)', repay)),
     field('Tilgungsart', method),
     field('Beginn (erste Rate)', start),
@@ -682,10 +692,10 @@ function viewFinance() {
   const ends = res.map((x) => x.r.endYm).filter(Boolean).sort();
   const end = ends.length === res.length ? ends[ends.length - 1] : null;
   const years = Fin.yearly(plans);
-  const kreditBudget = sum(budgetParts().filter((p) => /kredit|darlehen/i.test(p.name)), (p) => p.amount);
+  const plannedSum = sum(list.filter((L) => L.planned), (L) => L.amount);
 
   const stats = h('div', { class: 'stats' },
-    stat('Darlehen gesamt', fmtEUR(total), kreditBudget ? (Math.abs(kreditBudget - total) < 1 ? 'passt zum Budgetteil' : `Budgetteil Kredit: ${fmtEUR(kreditBudget)}`) : null, kreditBudget && Math.abs(kreditBudget - total) >= 1 ? 'warn' : ''),
+    stat('Darlehen gesamt', fmtEUR(total), plannedSum ? `davon ${fmtEUR(plannedSum)} nur zum Budgetieren` : 'fließt ins Budget (Kosten)'),
     stat('Monatliche Rate', fmtEUR(rateNow), 'aktuell, alle Darlehen'),
     stat('Restschuld heute', fmtEUR(nowBal)),
     stat('Schuldenfrei', end ? Fin.fmtYm(end) : '–', `Zinsen gesamt ${fmtEUR(interest)}`));
@@ -699,7 +709,7 @@ function viewFinance() {
     const open = openLoans.has(L.id);
     const yrs = Fin.yearly([r.plan]);
     return h('article', { class: 'card loan' },
-      h('div', { class: 'split', onclick: () => loanForm(L) }, h('h3', {}, L.name), h('strong', { class: 'amount' }, fmtEUR(L.amount))),
+      h('div', { class: 'split', onclick: () => loanForm(L) }, h('h3', {}, L.name), L.planned && chip('Zum Budgetieren', 'cs-angebot'), h('strong', { class: 'amount' }, fmtEUR(L.amount))),
       h('div', { class: 'muted small', onclick: () => loanForm(L) }, `${pct2(L.rate)} Zins · ${L.method === 'rate' ? 'Ratentilgung' : 'Annuität'} ${pct2(L.repay)} · Rate ${fmtEUR(r.payment)}`),
       h('div', { class: 'muted small', onclick: () => loanForm(L) }, `bis ${r.endYm ? Fin.fmtYm(r.endYm) : '–'} · Zinsen ${fmtEUR(r.interest)} · ${(L.start || '') > Fin.nowYm() ? 'Beginn ' + Fin.fmtYm(L.start) : 'Restschuld heute ' + fmtEUR(r.nowBalance)}`),
       L.fixYears > 0 && r.fixBalance != null && h('div', { class: 'muted small' }, `Restschuld nach ${L.fixYears} Jahren Zinsbindung: ${fmtEUR(r.fixBalance)}`),
