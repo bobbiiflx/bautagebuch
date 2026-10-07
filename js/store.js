@@ -134,7 +134,11 @@ export async function remove(type, id) {
   // zugehörige Dateien (Fotos, Dokument) mitlöschen
   for (const p of prev.data.photos || []) await deleteBlobPair(photoPaths(p).full, photoPaths(p).thumb);
   for (const r of prev.data.sketches || []) await deleteBlobPair(sketchPaths(r).json, sketchPaths(r).png);
-  if (type === 'documents' && prev.data.path) await deleteBlob(prev.data.path);
+  if (type === 'documents' && prev.data.path) {
+    // verlinkte Dokumente teilen sich eine Datei: erst löschen, wenn niemand sie mehr braucht
+    const shared = [...records.entries()].some(([k, r]) => k !== key && k.startsWith('documents/') && !r.deleted && r.data?.path === prev.data.path);
+    if (!shared) await deleteBlob(prev.data.path);
+  }
   setState({});
   schedulePush();
 }
@@ -232,6 +236,25 @@ export async function addDocumentFile(file, category, id) {
   return { path, size: blob.size, mime: blob.type || file.type || 'application/octet-stream', fileName: name };
 }
 export const replaceDocumentFilePath = deleteBlob;
+
+// Prüfsumme einer Datei, um doppelte Uploads zu erkennen
+export async function fileHash(blob) {
+  const buf = await blob.arrayBuffer();
+  const d = await crypto.subtle.digest('SHA-256', buf);
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+// Gibt ein vorhandenes Dokument mit identischem Inhalt zurück (ältere Einträge ohne Prüfsumme werden bei gleicher Größe nachgeprüft)
+export async function findDuplicate(hash, file) {
+  for (const [k, r] of records) {
+    if (!k.startsWith('documents/') || r.deleted || !r.data?.path) continue;
+    const d = r.data;
+    if (d.hash) { if (d.hash === hash) return d; continue; }
+    if (d.size === file.size) {
+      try { const b = await getBlobData(d.path); if (b && (await fileHash(b)) === hash) return d; } catch { /* ignorieren */ }
+    }
+  }
+  return null;
+}
 
 // Liefert eine anzeigbare URL: erst lokal, sonst aus OneDrive laden und zwischenspeichern.
 export function blobURL(path) {

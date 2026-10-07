@@ -439,7 +439,7 @@ function diaryDetail(d, onEdit) {
     d.text && h('section', { class: 'card' }, h('h3', {}, 'Notizen'), h('p', { class: 'dtext' }, d.text)),
     h('section', { class: 'card' },
       h('div', { class: 'split' }, h('h3', {}, 'Handschrift'), h('button', { type: 'button', class: 'btn-text small', onclick: () => sketchEdit(d, null) }, icon('draw', { size: 18 }), ' Neu')),
-      d.sketches?.length ? h('div', { class: 'ink-list' }, d.sketches.map((r) => inkThumb(r, { big: true, onClick: () => sketchEdit(d, r) }))) : h('p', { class: 'muted small' }, 'Mit dem Apple Pencil Skizzen, Maße oder Notizen festhalten – auch direkt auf einem Foto.')),
+      d.sketches?.length ? h('div', { class: 'ink-list' }, d.sketches.map((r) => h('div', { class: 'ink-item' }, inkThumb(r, { big: true, onClick: () => sketchEdit(d, r) }), h('button', { type: 'button', class: 'btn small block', onclick: () => sketchEdit(d, r) }, icon('edit', { size: 18 }), ' Bearbeiten')))) : h('p', { class: 'muted small' }, 'Mit dem Apple Pencil Skizzen, Maße oder Notizen festhalten – auch direkt auf einem Foto.')),
     d.photos?.length ? h('section', { class: 'card' }, h('h3', {}, `Fotos (${d.photos.length})`), h('div', { class: 'thumbs' }, d.photos.map((id) => thumb(id)))) : null,
     h('section', { class: 'card' },
       h('div', { class: 'split' }, h('h3', {}, 'Aufgaben im Gewerk'), d.phaseId && h('button', { type: 'button', class: 'btn-text small', onclick: () => todoForm(null, d.phaseId) }, icon('add', { size: 18 }), ' Neu')),
@@ -1191,8 +1191,10 @@ async function openDoc(d) {
       else download();
     } catch (e) { if (e?.name !== 'AbortError') toast('Teilen nicht möglich – bitte „Herunterladen“ nutzen.'); }
   };
+  const pdfInfo = h('div', { class: 'dv-pg muted small' });
+  const pdfBox = mime.includes('pdf') ? h('div', { class: 'dv-page' }) : null;
   const body = mime.startsWith('image/') ? h('img', { class: 'dv-img', src: url, alt: d.name })
-    : mime.includes('pdf') ? h('iframe', { class: 'dv-frame', src: url, title: d.name })
+    : pdfBox ? pdfBox
     : h('div', { class: 'dv-none' }, docIcon(mime), h('p', {}, 'Für diesen Dateityp gibt es keine Vorschau in der App.'), h('p', { class: 'muted small' }, 'Lade die Datei herunter oder teile sie, um sie in einer anderen App zu öffnen.'));
   dlg.append(
     h('div', { class: 'dv-bar' },
@@ -1201,10 +1203,40 @@ async function openDoc(d) {
       navigator.canShare ? h('button', { type: 'button', class: 'btn small', onclick: share }, 'Teilen') : null,
       h('button', { type: 'button', class: 'btn small', onclick: download }, 'Herunterladen'),
       mime.includes('pdf') ? h('button', { type: 'button', class: 'btn small', onclick: () => window.open(url, '_blank') }, 'Vollbild') : null),
-    h('div', { class: 'dv-body' }, body));
+    h('div', { class: 'dv-body' }, body), ...(pdfBox ? [pdfInfo] : []));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
+  if (pdfBox) fitPdfFirstPage(dlg, pdfBox, pdfInfo, url, d);
+}
+
+// Erste PDF-Seite komplett sichtbar anzeigen: Seitenmaße aus der Datei lesen, Rahmen passend einpassen, Rest abschneiden
+async function fitPdfFirstPage(dlg, box, info, url, d) {
+  let ratio = 595 / 842, pages = 0;
+  try {
+    const blob = await Store.getBlobData(d.path);
+    const txt = new TextDecoder('latin1').decode(new Uint8Array(await blob.arrayBuffer()));
+    const m = txt.match(/\/MediaBox\s*\[\s*(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)\s*\]/);
+    if (m) {
+      let w = Math.abs(m[3] - m[1]), hh = Math.abs(m[4] - m[2]);
+      if (/\/Rotate\s+(90|270)\b/.test(txt)) [w, hh] = [hh, w];
+      if (w > 0 && hh > 0) ratio = w / hh;
+    }
+    const cnt = [...txt.matchAll(/\/Type\s*\/Pages\b[^>]*?\/Count\s+(\d+)/g)].map((x) => +x[1]);
+    pages = cnt.length ? Math.max(...cnt) : (txt.match(/\/Type\s*\/Page\b(?!s)/g) || []).length;
+  } catch { /* Standardformat A4 */ }
+  const frame = h('iframe', { class: 'dv-frame', src: url + '#page=1&view=FitH&toolbar=0&navpanes=0&scrollbar=0', title: d.name, scrolling: 'no' });
+  box.append(frame);
+  const size = () => {
+    const st = box.parentElement; if (!st || !dlg.open) return;
+    const W = st.clientWidth - 24, H = st.clientHeight - 24;
+    const w = Math.max(100, Math.min(W, H * ratio));
+    box.style.width = w + 'px'; box.style.height = w / ratio + 'px';
+  };
+  size();
+  const ro = new ResizeObserver(size); ro.observe(box.parentElement);
+  dlg.addEventListener('close', () => ro.disconnect());
+  info.textContent = pages > 1 ? `Seite 1 von ${pages} – alle Seiten siehst du mit „Vollbild“.` : '';
 }
 
 // Kategorie normalisieren (früher gab es „Fotos & Sonstiges“)
@@ -1301,8 +1333,15 @@ function docAddForm({ files = [], mode = 'upload' } = {}) {
         else { toast('PDF wird erstellt …', 2500); out = new File([await imagesToPdf(shots)], safe + '.pdf', { type: 'application/pdf' }); }
       }
       const id = Store.uid();
-      const info = await Store.addDocumentFile(out, f.cat.value, id);
-      await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, ...info });
+      const hash = await Store.fileHash(out);
+      let info = null;
+      const twin = await Store.findDuplicate(hash, out);
+      if (twin) {
+        if (await askConfirm(`Diese Datei gibt es schon als „${twin.name}“. Statt sie noch einmal hochzuladen mit dem vorhandenen Dokument verlinken?`, 'Verlinken')) info = { path: twin.path, size: twin.size, mime: twin.mime, fileName: twin.fileName, linked: true };
+        else if (!(await askConfirm('Die Datei wird dann doppelt gespeichert. Trotzdem?', 'Doppelt speichern'))) return false;
+      }
+      if (!info) info = await Store.addDocumentFile(out, f.cat.value, id);
+      await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, hash, ...info });
     },
     onCancel: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   });
@@ -1344,25 +1383,36 @@ function docFilterSheet(opts) {
   });
 }
 
+// Rechnungs-Fotos aus „Kosten“ erscheinen verlinkt (ohne Kopie) in den Dokumenten
+function costDocs() {
+  const out = [];
+  for (const c of Store.all('costs')) {
+    const ph = c.photos || [];
+    ph.forEach((id, i) => out.push({ id: `cost:${c.id}:${id}`, virtual: true, costId: c.id, name: c.title + (ph.length > 1 ? ` (${i + 1}/${ph.length})` : ''), category: 'Rechnungen', tags: c.vendor ? [c.vendor] : [], phaseId: c.phaseId, date: c.date, mime: 'image/jpeg', path: Store.photoPaths(id).full, fileName: `${c.title}.jpg` }));
+  }
+  return out;
+}
+
 function viewDocs() {
-  const all = Store.all('documents').sort(byDateDesc);
+  const all = [...Store.all('documents'), ...costDocs()].sort(byDateDesc);
   const list = all.filter((d) => docMatches(d, docF));
   const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
   const set = (patch) => { Object.assign(docF, patch); render(); };
   const count = docF.cat.size + docF.phase.size + docF.tag.size;
   const active = count || docF.pin;
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
-  const tagIds = allDocTags().filter((t) => all.some((d) => (d.tags || []).includes(t)));
+  const tagIds = [...new Set(all.flatMap((d) => d.tags || []))].sort((a, b) => a.localeCompare(b, 'de'));
   const row = (d) => {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
-      ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t))].filter(Boolean);
+      ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t)),
+      d.virtual && h('span', { class: 'tchip plain' }, 'aus Kosten')].filter(Boolean);
     const stop = (fn) => (e) => { e.stopPropagation(); fn(); };
     return h('div', { class: 'doc' + (d.pinned ? ' pinned' : ''), role: 'button', tabindex: 0, onclick: () => openDoc(d), onkeydown: (e) => { if (e.key === 'Enter') openDoc(d); } },
       h('div', { class: 'doc-i' }, docIcon(d.mime)),
       h('div', { class: 'doc-t' }, h('div', {}, d.name), h('div', { class: 'dc-chips' }, chips), h('div', { class: 'muted small' }, [fmtDate(d.date), fmtSize(d.size || 0)].filter(Boolean).join(' · '))),
-      h('button', { class: 'mv pinbtn' + (d.pinned ? ' on' : ''), 'aria-label': d.pinned ? 'Nicht mehr anpinnen' : 'Anpinnen', 'aria-pressed': String(!!d.pinned), onclick: stop(() => Store.save('documents', { ...d, pinned: !d.pinned })) }, icon('push_pin', { size: 22, filled: !!d.pinned })),
-      h('button', { class: 'mv', 'aria-label': 'Bearbeiten', onclick: stop(() => docEditForm(d)) }, icon('edit', { size: 22 })));
+      d.virtual ? null : h('button', { class: 'mv pinbtn' + (d.pinned ? ' on' : ''), 'aria-label': d.pinned ? 'Nicht mehr anpinnen' : 'Anpinnen', 'aria-pressed': String(!!d.pinned), onclick: stop(() => Store.save('documents', { ...d, pinned: !d.pinned })) }, icon('push_pin', { size: 22, filled: !!d.pinned })),
+      h('button', { class: 'mv', 'aria-label': d.virtual ? 'Kosten-Eintrag öffnen' : 'Bearbeiten', onclick: stop(() => (d.virtual ? costForm(Store.get('costs', d.costId)) : docEditForm(d))) }, icon(d.virtual ? 'receipt_long' : 'edit', { size: 22 })));
   };
   return h(
     'div',
