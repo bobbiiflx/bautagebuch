@@ -475,3 +475,20 @@ dialog.inkx[open] { display: flex; flex-direction: column; }
 .fp-list .grow { flex: 1; }
 .chip.ok { background: color-mix(in srgb, var(--ok-ink) 16%, transparent); color: var(--ok-ink); }
 .fp-crumb { margin-bottom: 8px; word-break: break-all; }
+
+/* Dokumente: Tags, Pin, Vorschläge */
+.pills.wrap { flex-wrap: wrap; overflow: visible; }
+.doc { align-items: flex-start; }
+.doc-t .dc-chips { margin: 4px 0 2px; }
+
+.doc .mv { flex: none; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center; border-radius: 10px; border: 0; background: transparent; color: var(--muted); }
+.pinbtn.on { color: var(--accent); }
+button.tchip { border: 0; cursor: pointer; font-family: inherit; }
+.sugg { background: var(--accent-soft); border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; }
+.sugg-h { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; color: var(--accent); }
+.sugg .row { display: flex; gap: 8px; align-items: center; }
+.rules summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
+.rule { display: grid; grid-template-columns: 62px 1fr; gap: 2px 8px; }
+.rule .rk { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: 2px; }
+.rule .rw { overflow-wrap: anywhere; }
+.rule .ra { grid-column: 2; }

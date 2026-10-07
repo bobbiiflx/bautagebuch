@@ -9,6 +9,7 @@ import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import { splashOn, setSplash } from './splash.js';
 import { makeBackup, readBackup } from './backup.js';
+import { DEFAULT_DOC_RULES, suggest } from './docrules.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
@@ -1162,7 +1163,7 @@ function viewPlan() {
 }
 
 // ---------- Ansicht: Dokumente ----------
-let docFilter = '';
+let docFilter = '';  // '', '__pin' oder Kategorie/Gewerk/Tag
 function docIcon(mime = '') {
   return icon(mime.includes('pdf') ? 'picture_as_pdf' : mime.startsWith('image/') ? 'image' : mime.includes('sheet') || mime.includes('excel') ? 'table_chart' : mime.includes('word') ? 'description' : 'attach_file', { size: 28 });
 }
@@ -1184,61 +1185,152 @@ async function openDoc(d) {
   }
 }
 
+// Kategorie normalisieren (früher gab es „Fotos & Sonstiges“)
+const docCat = (d) => (d.category === 'Fotos & Sonstiges' || !DOC_CATEGORIES.includes(d.category) ? ((d.mime || '').startsWith('image/') ? 'Fotos' : 'Sonstiges') : d.category);
+const parseTags = (s) => [...new Set(String(s || '').split(/[,;#]+/).map((x) => x.trim()).filter(Boolean))];
+const docRules = () => Store.get('settings', 'docrules')?.list || DEFAULT_DOC_RULES;
+const allDocTags = () => [...new Set(Store.all('documents').flatMap((d) => d.tags || []).concat(docRules().map((r) => r.tag).filter((t) => t && !DOC_CATEGORIES.includes(t))))].sort((a, b) => a.localeCompare(b, 'de'));
+
+// Gemeinsame Felder für Hinzufügen/Bearbeiten: Kategorie, Gewerk, Tags + Vorschlagsbox (Bestätigung durch Tipp auf „Übernehmen“)
+function docFields(init) {
+  const cat = h('select', {}, DOC_CATEGORIES.map((c) => h('option', { value: c }, c)));
+  cat.value = init.category || 'Sonstiges';
+  const phase = usageSelect(init.phaseId || '');
+  const tags = h('input', { type: 'text', list: 'doctags', placeholder: 'z. B. Statik, Bad (mit Komma trennen)', value: (init.tags || []).join(', ') });
+  const dl = h('datalist', { id: 'doctags' }, allDocTags().map((t) => h('option', { value: t })));
+  const box = h('div', {});
+  let dismissed = '';
+  const offer = (fileName, mime) => {
+    const sg = suggest(fileName, docRules(), DOC_CATEGORIES, mime);
+    const key = sg ? JSON.stringify([sg.category, sg.phaseId, sg.tags]) : '';
+    const cur = parseTags(tags.value);
+    const differs = sg && ((sg.category && sg.category !== cat.value) || (sg.phaseId && sg.phaseId !== phase.value) || sg.tags.some((t) => !cur.includes(t)));
+    if (!sg || !differs || dismissed === key) return box.replaceChildren();
+    const parts = [sg.category && h('span', { class: 'tchip plain' }, sg.category), sg.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(sg.phaseId) } }, phaseName(sg.phaseId)), ...sg.tags.map((t) => h('span', { class: 'tchip plain' }, '#' + t))].filter(Boolean);
+    box.replaceChildren(h('div', { class: 'sugg' },
+      h('div', { class: 'sugg-h' }, icon('insights', { size: 18 }), h('strong', {}, ' Vorschlag'), h('span', { class: 'muted small' }, ' · ' + [...new Set(sg.reasons)].join(', '))),
+      h('div', { class: 'dc-chips' }, parts),
+      h('div', { class: 'row' },
+        h('button', { type: 'button', class: 'btn small', onclick: () => {
+          if (sg.category) cat.value = sg.category;
+          if (sg.phaseId) phase.value = sg.phaseId;
+          tags.value = [...new Set([...parseTags(tags.value), ...sg.tags])].join(', ');
+          box.replaceChildren();
+        } }, 'Übernehmen'),
+        h('button', { type: 'button', class: 'btn-text small', onclick: () => { dismissed = key; box.replaceChildren(); } }, 'Ignorieren'))));
+  };
+  return { cat, phase, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk / Phase', phase), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
+}
+
 function docAddForm() {
   let file = null;
   const label = h('div', { class: 'hint' }, 'Noch nichts ausgewählt');
   const name = h('input', { type: 'text', required: true, placeholder: 'Bezeichnung' });
-  const cat = h('select', {}, DOC_CATEGORIES.map((c) => h('option', { value: c }, c)));
-  const phase = usageSelect('');
+  const f = docFields({ category: 'Sonstiges' });
   const note = h('textarea', { rows: 3 });
+  const check = () => f.offer((file?.name || '') + ' ' + name.value.trim(), file?.type || '');
   const pick = (e) => {
     file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
     label.textContent = `${file.name} · ${fmtSize(file.size)}`;
     if (!name.value) name.value = file.name.replace(/\.[^.]+$/, '');
-    if (/rechnung/i.test(file.name)) cat.value = 'Rechnungen';
-    else if (/angebot/i.test(file.name)) cat.value = 'Angebote';
-    else if (/vertrag/i.test(file.name)) cat.value = 'Verträge';
-    else if (/plan|grundriss/i.test(file.name)) cat.value = 'Pläne';
+    check();
   };
+  name.addEventListener('change', check);
   const fileIn = h('input', { type: 'file', hidden: true, onchange: pick });
   const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: pick });
   sheet('Dokument hinzufügen', [
     h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => fileIn.click() }, icon('folder_open', { size: 20 }), ' Datei wählen'), h('button', { type: 'button', class: 'btn', onclick: () => camIn.click() }, icon('photo_camera', { size: 20 }), ' Fotografieren')),
-    label, fileIn, camIn, field('Bezeichnung', name), field('Kategorie', cat), field('Gewerk / Phase', phase), field('Notiz', note),
+    label, fileIn, camIn, field('Bezeichnung', name), ...f.els, field('Notiz', note),
   ], {
     onSave: async () => {
       if (!file) { toast('Bitte zuerst eine Datei wählen oder fotografieren.'); return false; }
       const id = Store.uid();
-      const info = await Store.addDocumentFile(file, cat.value, id);
-      await Store.save('documents', { id, name: name.value.trim(), category: cat.value, phaseId: phase.value, note: note.value.trim(), date: today(), ...info });
+      const info = await Store.addDocumentFile(file, f.cat.value, id);
+      await Store.save('documents', { id, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), ...info });
     },
   });
 }
 
 function docEditForm(d) {
   const name = h('input', { type: 'text', required: true, value: d.name });
-  const phase = usageSelect(d.phaseId);
+  const f = docFields({ category: docCat(d), phaseId: d.phaseId, tags: d.tags });
   const note = h('textarea', { rows: 3, value: d.note || '' });
-  sheet('Dokument', [h('p', { class: 'muted small' }, `${d.category} · ${fmtSize(d.size || 0)} · ${fmtDate(d.date)}`), field('Bezeichnung', name), field('Gewerk / Phase', phase), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
-    onSave: () => Store.save('documents', { ...d, name: name.value.trim(), phaseId: phase.value, note: note.value.trim() }),
+  const pin = h('input', { type: 'checkbox', role: 'switch', checked: !!d.pinned });
+  f.offer(d.fileName || d.name, d.mime);
+  sheet('Dokument', [h('p', { class: 'muted small' }, `${fmtSize(d.size || 0)} · ${fmtDate(d.date)}${d.fileName ? ' · ' + d.fileName : ''}`), field('Bezeichnung', name), ...f.els, h('label', { class: 'switch-row' }, h('span', {}, 'Oben anpinnen'), pin), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
+    onSave: () => Store.save('documents', { ...d, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: pin.checked, phaseId: f.phase.value, note: note.value.trim() }),
     onDelete: () => Store.remove('documents', d.id),
   });
 }
 
+const docMatches = (d, f) => !f || (f === '__pin' ? !!d.pinned : docCat(d) === f || (d.phaseId && phaseName(d.phaseId) === f) || (d.tags || []).includes(f));
+
 function viewDocs() {
   const all = Store.all('documents').sort(byDateDesc);
-  const list = all.filter((d) => !docFilter || d.category === docFilter);
+  const list = all.filter((d) => docMatches(d, docFilter));
+  const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
+  const toggleF = (v) => { docFilter = docFilter === v ? '' : v; render(); };
+  const pill = (v, t, ic) => h('button', { class: 'pill' + (docFilter === v ? ' on' : ''), onclick: () => toggleF(v) }, ic && icon(ic, { size: 16, filled: true }), ic ? ' ' : '', t);
+  const known = new Set(['', '__pin', ...DOC_CATEGORIES]);
+  const row = (d) => {
+    const chips = [h('button', { type: 'button', class: 'tchip plain', onclick: () => toggleF(docCat(d)) }, docCat(d)),
+      d.phaseId && h('button', { type: 'button', class: 'tchip', style: { '--pc': phaseColor(d.phaseId) }, onclick: () => toggleF(phaseName(d.phaseId)) }, phaseName(d.phaseId)),
+      ...(d.tags || []).map((t) => h('button', { type: 'button', class: 'tchip plain', onclick: () => toggleF(t) }, '#' + t))].filter(Boolean);
+    return h('div', { class: 'doc' + (d.pinned ? ' pinned' : '') },
+      h('div', { class: 'doc-i', onclick: () => openDoc(d) }, docIcon(d.mime)),
+      h('div', { class: 'doc-t' }, h('div', { onclick: () => openDoc(d) }, d.name), h('div', { class: 'dc-chips' }, chips), h('div', { class: 'muted small' }, [fmtDate(d.date), fmtSize(d.size || 0)].filter(Boolean).join(' · '))),
+      h('button', { class: 'mv pinbtn' + (d.pinned ? ' on' : ''), 'aria-label': d.pinned ? 'Nicht mehr anpinnen' : 'Anpinnen', 'aria-pressed': String(!!d.pinned), onclick: () => Store.save('documents', { ...d, pinned: !d.pinned }) }, icon('push_pin', { size: 22, filled: !!d.pinned })),
+      h('button', { class: 'mv', 'aria-label': 'Details', onclick: () => docEditForm(d) }, icon('edit', { size: 22 })));
+  };
   return h(
     'div',
     { class: 'view' },
-    h('div', { class: 'pills' }, [['', 'Alle'], ...DOC_CATEGORIES.map((c) => [c, c])].map(([v, t]) => h('button', { class: 'pill' + (docFilter === v ? ' on' : ''), onclick: () => { docFilter = v; render(); } }, t))),
+    h('div', { class: 'pills wrap' }, pill('', 'Alle'), all.some((d) => d.pinned) && pill('__pin', 'Angepinnt', 'push_pin'), DOC_CATEGORIES.map((c) => pill(c, c)), !known.has(docFilter) && pill(docFilter, docFilter + ' ×')),
     list.length
-      ? h('div', { class: 'card' }, list.map((d) => h('div', { class: 'doc' }, h('div', { class: 'doc-i', onclick: () => openDoc(d) }, docIcon(d.mime)), h('div', { class: 'doc-t', onclick: () => openDoc(d) }, h('div', {}, d.name), h('div', { class: 'muted small' }, [d.category, phaseName(d.phaseId), fmtDate(d.date)].filter(Boolean).join(' · '))), h('button', { class: 'mv', 'aria-label': 'Details', onclick: () => docEditForm(d) }, '⋯'))))
-      : empty('Keine Dokumente', 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
+      ? [pinned.length && rest.length ? h('div', { class: 'sub' }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt') : null,
+         pinned.length ? h('div', { class: 'card' }, pinned.map(row)) : null,
+         pinned.length && rest.length ? h('div', { class: 'sub' }, 'Weitere') : null,
+         rest.length ? h('div', { class: 'card' }, rest.map(row)) : null]
+      : empty('Keine Dokumente', docFilter ? 'Mit diesem Filter gibt es nichts. Tippe oben auf „Alle“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
     fab(docAddForm)
   );
+}
+
+// Referenztabelle bearbeiten (Einstellungen)
+function ruleForm(rule) {
+  const kind = h('select', {}, h('option', { value: 'name' }, 'Dateiname enthält'), h('option', { value: 'ext' }, 'Dateiendung ist'));
+  kind.value = rule?.kind || 'name';
+  const words = h('input', { type: 'text', required: true, placeholder: 'z. B. rechnung, abschlag', value: rule?.words || '' });
+  const tag = h('input', { type: 'text', list: 'ruletags', placeholder: 'Kategorie oder Tag', value: rule?.tag || '' });
+  const dl = h('datalist', { id: 'ruletags' }, [...DOC_CATEGORIES, ...allDocTags()].map((t) => h('option', { value: t })));
+  const phase = usageSelect(rule?.phaseId || '', '– kein Gewerk –');
+  const save = async (list) => Store.save('settings', { id: 'docrules', list });
+  sheet(rule ? 'Regel bearbeiten' : 'Neue Regel', [field('Wenn …', kind), field('Wörter / Endungen', words, 'Mehrere mit Komma trennen. Umlaute sind egal (küche = kueche). Bei Namen zählen Wörter ab 3 Buchstaben.'), field('… dann Kategorie oder Tag', tag, `Feste Kategorien: ${DOC_CATEGORIES.join(', ')}. Alles andere wird ein zusätzlicher Tag.`), dl, field('… und Gewerk', phase)], {
+    onSave: async () => {
+      if (!words.value.trim()) return false;
+      if (!tag.value.trim() && !phase.value) { toast('Bitte ein Tag oder ein Gewerk angeben.'); return false; }
+      const r = { id: rule?.id || 'r' + Date.now().toString(36), kind: kind.value, words: words.value.trim(), tag: tag.value.trim(), phaseId: phase.value };
+      const cur = docRules();
+      await save(rule ? cur.map((x) => (x.id === r.id ? r : x)) : [...cur, r]);
+    },
+    onDelete: rule && (async () => save(docRules().filter((x) => x.id !== rule.id))),
+  });
+}
+let rulesOpen = false;
+function docRulesCard() {
+  const list = docRules();
+  const custom = !!Store.get('settings', 'docrules');
+  return card('Dokumente: Zuordnungs-Vorschläge',
+    h('p', { class: 'muted small' }, 'Beim Hinzufügen schlägt die App anhand von Dateiendung und Dateiname Kategorie, Gewerk und Tags vor. Du bestätigst oder änderst den Vorschlag selbst. Die Regeln der Reihe nach: Die erste passende Kategorie und das erste passende Gewerk gelten.'),
+    h('details', { class: 'rules', open: rulesOpen, ontoggle: (e) => { rulesOpen = e.currentTarget.open; } }, h('summary', {}, `Regeln anzeigen (${list.length})`),
+      h('div', { class: 'rule-list' }, list.map((r) => h('div', { class: 'line rule', onclick: () => ruleForm(r) },
+        h('span', { class: 'rk' }, r.kind === 'ext' ? 'Endung' : 'Name'),
+        h('span', { class: 'rw' }, r.words),
+        h('span', { class: 'ra muted small' }, '→ ' + [r.tag, r.phaseId && phaseName(r.phaseId)].filter(Boolean).join(' · '))))),
+      h('button', { class: 'btn block', onclick: () => ruleForm(null) }, '+ Regel hinzufügen'),
+      custom && h('button', { class: 'btn block', onclick: async () => { if (await askConfirm('Alle eigenen Änderungen an den Regeln verwerfen und die Standardregeln wiederherstellen?', 'Zurücksetzen')) await Store.remove('settings', 'docrules'); } }, 'Auf Standard zurücksetzen')));
 }
 
 // ---------- Ansicht: Einstellungen ----------
@@ -1368,6 +1460,7 @@ function viewSettings() {
     card('Standort für das Wetter', locBox()),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
     card('Startbildschirm', h('label', { class: 'switch-row' }, h('span', {}, 'Startbildschirm beim Öffnen zeigen'), h('input', { type: 'checkbox', role: 'switch', checked: splashOn(), onchange: (e) => setSplash(e.target.checked) })), h('p', { class: 'muted small' }, 'Gilt nur für dieses Gerät. Ein Tipp beendet den Startbildschirm sofort.')),
+    docRulesCard(),
     card('Eigene Gewerke',
       customTrades().length ? customTrades().map((t) => h('div', { class: 'line', onclick: () => tradeForm(t) }, h('span', {}, t.name), h('span', { class: 'muted small' }, 'bearbeiten'))) : h('p', { class: 'muted small' }, 'Material, Architektur und Planung sowie Werkzeug gibt es schon. Hier kannst du weitere Gewerke oder Verwendungen anlegen.'),
       h('button', { class: 'btn block', onclick: () => tradeForm(null) }, '+ Eigenes Gewerk')

@@ -27,7 +27,7 @@ export const PHASE_STATES = [
   ['fertig', 'Fertig'],
 ];
 
-export const DOC_CATEGORIES = ['Verträge', 'Pläne', 'Rechnungen', 'Angebote', 'Genehmigungen', 'Fotos & Sonstiges'];
+export const DOC_CATEGORIES = ['Verträge', 'Pläne', 'Rechnungen', 'Angebote', 'Genehmigungen', 'Fotos', 'Sonstiges'];
 
 export const COST_STATES = [
   ['angebot', 'Angebot'],
