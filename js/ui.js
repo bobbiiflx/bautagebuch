@@ -12,6 +12,7 @@ import { makeBackup, readBackup } from './backup.js';
 import { DEFAULT_DOC_RULES, suggest } from './docrules.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
+import { imagesToPdf } from './pdf.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import * as Fin from './finance.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
@@ -1222,34 +1223,67 @@ function docFields(init) {
   return { cat, phase, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk / Phase', phase), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
 }
 
-function docAddForm() {
-  let file = null;
-  const label = h('div', { class: 'hint' }, 'Noch nichts ausgewählt');
-  const name = h('input', { type: 'text', required: true, placeholder: 'Bezeichnung' });
+// Datei-Eingaben liegen dauerhaft im Dokument (nicht in der Ansicht): Beim Öffnen der Kamera kann die Ansicht neu zeichnen,
+// ohne dass die Eingabe verloren geht.
+const docIn = {};
+function docInput(kind) {
+  if (!docIn[kind]) {
+    const cam = kind === 'cam';
+    const el = h('input', { type: 'file', hidden: true, accept: cam ? 'image/*' : null, capture: cam ? 'environment' : null });
+    el.addEventListener('change', () => { const fs = [...el.files]; el.value = ''; const t = el._target; el._target = null; if (fs.length && t) t(fs); });
+    document.body.append(el);
+    docIn[kind] = el;
+  }
+  return docIn[kind];
+}
+const pickFiles = (kind, cb) => { const el = docInput(kind); el._target = cb; el.click(); };
+
+// Hochladen / Foto machen: erst Datei bzw. Foto wählen, dann erscheint die Maske. Mehrere Fotos werden ein PDF.
+function docAddForm({ files = [], mode = 'upload' } = {}) {
+  let file = mode === 'upload' ? files[0] : null;
+  const shots = mode === 'photo' ? [...files] : [];
+  const urls = new Map();
+  const urlOf = (f) => { if (!urls.has(f)) urls.set(f, URL.createObjectURL(f)); return urls.get(f); };
+  const defName = mode === 'photo' ? `Foto ${fmtDate(today())}` : (file?.name || '').replace(/\.[^.]+$/, '');
+  const name = h('input', { type: 'text', required: true, placeholder: 'Bezeichnung', value: defName });
   const f = docFields({ category: 'Sonstiges' });
   const note = h('textarea', { rows: 3 });
-  const check = () => f.offer((file?.name || '') + ' ' + name.value.trim(), file?.type || '');
-  const pick = (e) => {
-    file = e.target.files[0];
-    e.target.value = '';
-    if (!file) return;
-    label.textContent = `${file.name} · ${fmtSize(file.size)}`;
-    if (!name.value) name.value = file.name.replace(/\.[^.]+$/, '');
+  const preview = h('div', { class: 'photofield' });
+  const check = () => f.offer(mode === 'photo' ? name.value.trim() : (file?.name || '') + ' ' + name.value.trim(), mode === 'photo' ? 'image/jpeg' : file?.type || '');
+  const paint = () => {
+    if (mode === 'photo') {
+      preview.replaceChildren(
+        h('span', { class: 'lbl' }, `Fotos (${shots.length})`),
+        h('div', { class: 'thumbs' }, shots.map((sh, i) => h('div', { class: 'thumb nozoom' }, h('img', { class: 'thumb-img', alt: `Foto ${i + 1}`, src: urlOf(sh) }), h('span', { class: 'pg' }, String(i + 1)), h('button', { type: 'button', class: 'x', 'aria-label': 'Foto entfernen', onclick: () => { shots.splice(i, 1); paint(); } }, '×')))),
+        h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => pickFiles('cam', (fs) => { shots.push(...fs); paint(); }) }, icon('photo_camera', { size: 20 }), ' Weiteres Foto')),
+        shots.length > 1 ? h('p', { class: 'muted small' }, `Die ${shots.length} Fotos werden als ein PDF mit ${shots.length} Seiten gespeichert.`) : null);
+    } else {
+      preview.replaceChildren(
+        h('span', { class: 'lbl' }, 'Datei'),
+        h('div', { class: 'hint' }, `${file.name} · ${fmtSize(file.size)}`),
+        h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => pickFiles('up', (fs) => { file = fs[0]; if (!name.value.trim() || name.dataset.auto === '1') { name.value = file.name.replace(/\.[^.]+$/, ''); name.dataset.auto = '1'; } paint(); }) }, icon('folder_open', { size: 20 }), ' Andere Datei')));
+    }
     check();
   };
+  name.dataset.auto = '1';
+  name.addEventListener('input', () => { name.dataset.auto = '0'; });
   name.addEventListener('change', check);
-  const fileIn = h('input', { type: 'file', hidden: true, onchange: pick });
-  const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: pick });
-  sheet('Dokument hinzufügen', [
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => fileIn.click() }, icon('folder_open', { size: 20 }), ' Datei wählen'), h('button', { type: 'button', class: 'btn', onclick: () => camIn.click() }, icon('photo_camera', { size: 20 }), ' Fotografieren')),
-    label, fileIn, camIn, field('Bezeichnung', name), ...f.els, field('Notiz', note),
-  ], {
+  paint();
+  sheet('Dokument hinzufügen', [preview, field('Bezeichnung', name), ...f.els, field('Notiz', note)], {
     onSave: async () => {
-      if (!file) { toast('Bitte zuerst eine Datei wählen oder fotografieren.'); return false; }
+      let out = file;
+      const nm = name.value.trim() || 'Dokument';
+      const safe = nm.replace(/[\\/:*?"<>|#%]/g, '_').slice(0, 60);
+      if (mode === 'photo') {
+        if (!shots.length) { toast('Bitte mindestens ein Foto aufnehmen.'); return false; }
+        if (shots.length === 1) out = new File([shots[0]], safe + '.jpg', { type: shots[0].type || 'image/jpeg' });
+        else { toast('PDF wird erstellt …', 2500); out = new File([await imagesToPdf(shots)], safe + '.pdf', { type: 'application/pdf' }); }
+      }
       const id = Store.uid();
-      const info = await Store.addDocumentFile(file, f.cat.value, id);
-      await Store.save('documents', { id, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), ...info });
+      const info = await Store.addDocumentFile(out, f.cat.value, id);
+      await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, ...info });
     },
+    onCancel: () => urls.forEach((u) => URL.revokeObjectURL(u)),
   });
 }
 
@@ -1294,7 +1328,9 @@ function viewDocs() {
          pinned.length && rest.length ? h('div', { class: 'sub' }, 'Weitere') : null,
          rest.length ? h('div', { class: 'card' }, rest.map(row)) : null]
       : empty('Keine Dokumente', docFilter ? 'Mit diesem Filter gibt es nichts. Tippe oben auf „Alle“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
-    fab(docAddForm)
+    h('div', { class: 'fab-pair' },
+      h('button', { class: 'fab-x alt', onclick: () => pickFiles('up', (fs) => docAddForm({ files: fs, mode: 'upload' })) }, icon('upload_file', { size: 22 }), ' Hochladen'),
+      h('button', { class: 'fab-x', onclick: () => pickFiles('cam', (fs) => docAddForm({ files: fs, mode: 'photo' })) }, icon('photo_camera', { size: 22 }), ' Foto machen'))
   );
 }
 

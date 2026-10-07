@@ -492,3 +492,10 @@ button.tchip { border: 0; cursor: pointer; font-family: inherit; }
 .rule .rk { font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding-top: 2px; }
 .rule .rw { overflow-wrap: anywhere; }
 .rule .ra { grid-column: 2; }
+
+/* Dokumente: Hochladen / Foto machen */
+.fab-pair { position: fixed; right: 14px; bottom: calc(var(--tab) + env(safe-area-inset-bottom) + 18px); z-index: 9; display: flex; gap: 10px; }
+.fab-x { display: inline-flex; align-items: center; gap: 8px; height: 54px; padding: 0 20px; border: 0; border-radius: 18px; background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; box-shadow: 0 8px 22px rgba(59, 91, 219, .35); }
+.fab-x.alt { background: var(--card); color: var(--accent); box-shadow: 0 8px 22px rgba(0, 0, 0, .18), 0 0 0 1px var(--line); }
+.thumb.nozoom { cursor: default; }
+.thumb .pg { position: absolute; left: 4px; bottom: 4px; min-width: 20px; padding: 1px 6px; border-radius: 99px; background: rgba(0,0,0,.65); color: #fff; font-size: .75rem; text-align: center; }
