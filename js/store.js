@@ -463,3 +463,9 @@ export async function importAll(data, blobs = new Map()) {
   schedulePush();
   return { records: n, files: blobs.size };
 }
+
+// Wo liegt die Datei? 'ok' = in OneDrive, 'pending' = wartet auf Upload, 'local' = OneDrive nicht verbunden
+export function blobStatus(path) {
+  if (!remote) return 'local';
+  return blobMeta.get(path)?.dirty ? 'pending' : 'ok';
+}

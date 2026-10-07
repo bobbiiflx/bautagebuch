@@ -1169,21 +1169,43 @@ function docIcon(mime = '') {
   return icon(mime.includes('pdf') ? 'picture_as_pdf' : mime.startsWith('image/') ? 'image' : mime.includes('sheet') || mime.includes('excel') ? 'table_chart' : mime.includes('word') ? 'description' : 'attach_file', { size: 28 });
 }
 
+// Dokument in der App ansehen (statt roher Browser-Adresse): Titel, Speicherort, Teilen, Herunterladen
 async function openDoc(d) {
+  let url;
   try {
     toast('Dokument wird geladen …', 1500);
-    const url = await Store.blobURL(d.path);
-    if (!url) return toast('Die Datei liegt noch nicht auf diesem Gerät und ist in OneDrive nicht auffindbar.');
-    const w = window.open(url, '_blank');
-    if (!w) {
-      const a = h('a', { href: url, download: d.fileName || d.name });
-      document.body.append(a);
-      a.click();
-      a.remove();
-    }
-  } catch (e) {
-    toast('Öffnen fehlgeschlagen: ' + (e.message || e));
-  }
+    url = await Store.blobURL(d.path);
+  } catch (e) { return toast('Öffnen fehlgeschlagen: ' + (e.message || e)); }
+  if (!url) return toast('Die Datei liegt noch nicht auf diesem Gerät und ist in OneDrive nicht auffindbar.');
+  const fileName = d.fileName || d.name;
+  const mime = d.mime || '';
+  const st = Store.blobStatus(d.path);
+  const where = { ok: ['cloud_done', 'In deinem OneDrive gesichert'], pending: ['cloud_sync', 'Wird nach OneDrive hochgeladen …'], local: ['cloud_off', 'Nur auf diesem Gerät gespeichert (OneDrive nicht verbunden)'] }[st];
+  const dlg = h('dialog', { class: 'docview', 'aria-label': d.name });
+  const close = () => { dlg.close(); dlg.remove(); };
+  const download = () => { const a = h('a', { href: url, download: fileName }); document.body.append(a); a.click(); a.remove(); };
+  const share = async () => {
+    try {
+      const blob = await Store.getBlobData(d.path);
+      const f = new File([blob], fileName, { type: mime || blob.type });
+      if (navigator.canShare?.({ files: [f] })) await navigator.share({ files: [f], title: d.name });
+      else download();
+    } catch (e) { if (e?.name !== 'AbortError') toast('Teilen nicht möglich – bitte „Herunterladen“ nutzen.'); }
+  };
+  const body = mime.startsWith('image/') ? h('img', { class: 'dv-img', src: url, alt: d.name })
+    : mime.includes('pdf') ? h('iframe', { class: 'dv-frame', src: url, title: d.name })
+    : h('div', { class: 'dv-none' }, docIcon(mime), h('p', {}, 'Für diesen Dateityp gibt es keine Vorschau in der App.'), h('p', { class: 'muted small' }, 'Lade die Datei herunter oder teile sie, um sie in einer anderen App zu öffnen.'));
+  dlg.append(
+    h('div', { class: 'dv-bar' },
+      h('button', { type: 'button', class: 'ink-b', 'aria-label': 'Schließen', onclick: close }, icon('close', { size: 24 })),
+      h('div', { class: 'dv-t' }, h('div', { class: 'dv-n' }, d.name), h('div', { class: 'muted small dv-w' }, icon(where[0], { size: 16 }), ' ' + where[1])),
+      navigator.canShare ? h('button', { type: 'button', class: 'btn small', onclick: share }, 'Teilen') : null,
+      h('button', { type: 'button', class: 'btn small', onclick: download }, 'Herunterladen'),
+      mime.includes('pdf') ? h('button', { type: 'button', class: 'btn small', onclick: () => window.open(url, '_blank') }, 'Vollbild') : null),
+    h('div', { class: 'dv-body' }, body));
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg);
+  dlg.showModal();
 }
 
 // Kategorie normalisieren (früher gab es „Fotos & Sonstiges“)
