@@ -136,6 +136,31 @@ export function buildHouse(engine) {
   const hedge = (x0, x1, z) => { for (let x = x0; x < x1; x += 0.95) terrain.add(box(1.0, 0.8 + ((x * 7) % 3) * 0.06, 0.8, 0x4cb458, { shadow: true }).at(x, 0.4, z)); };
   hedge(-3.3, 8.0, 11.0); hedge(-12.5, -6.6, 11.0);
   for (let x = -18; x <= 20; x += 2.6) if (x < -6.4 || x > -3.6) { terrain.add(box(0.12, 0.7, 0.12, 0xc9a46a).at(x, 0.35, 11.5)); }
+  // Blumenbeet vor der Hecke, Zaunriegel, Laubbäume, Gartenhaus, Gemüsebeete
+  {
+    const fl = [0xe8505b, 0xffd23f, 0xf7a1c4, 0xffffff, 0xb28cf2];
+    for (let k = 0, x = -3.0; x < 7.8; x += 0.62, k++) terrain.add(new Node(G.sphere(0.14, 5, 3), { color: hex(fl[k % fl.length]) }).at(x, 0.16, 11.75 + (k % 2) * 0.12));
+    for (let x = -18; x < 20; x += 2.6) if (x < -6.4 || x > -3.6) terrain.add(box(2.45, 0.06, 0.05, 0xd9b77e).at(x + 1.3, 0.55, 11.5), box(2.45, 0.06, 0.05, 0xd9b77e).at(x + 1.3, 0.3, 11.5));
+    const oak = (x, z, s = 1, c = 0x5fbf5a) => {
+      const g = grp('laubbaum');
+      g.add(cylN(0.22, 0.32, 2.2, 0x7a4f33, 6).at(0, 1.1, 0));
+      [[0, 3.2, 0, 1.5], [0.9, 2.9, 0.3, 1.0], [-0.8, 3.0, -0.3, 1.1], [0.1, 4.2, 0.2, 1.0]].forEach(([dx, y, dz, r], i) => g.add(new Node(G.sphere(r, 6, 4), { color: hex(i % 2 ? c : 0x4fae52), shadow: true }).at(dx, y, dz)));
+      g.at(x, 0, z).size(s); return g;
+    };
+    terrain.add(oak(-17.5, -6, 1.1), oak(16.5, -4.5, 1.0, 0x6ac765), oak(-12.5, 12.5, 0.8));
+    const shed = grp('gartenhaus').at(-13, 0, -7).rotate(0, 0.25, 0);
+    shed.add(box(2.6, 2.0, 2.0, 0xc9a46a, { shadow: true }).at(0, 1.0, 0), box(0.7, 1.5, 0.06, 0x7a4f33).at(-0.5, 0.75, 1.03), box(0.7, 0.5, 0.06, 0x9fe0f7, { outline: false }).at(0.65, 1.25, 1.03));
+    const rf = box(3.0, 0.1, 1.35, 0x6b5a4e, { shadow: true }); rf.at(0, 2.35, 0.55).rotate(0.42, 0, 0);
+    const rb = box(3.0, 0.1, 1.35, 0x5d4d42, { shadow: true }); rb.at(0, 2.35, -0.55).rotate(-0.42, 0, 0);
+    shed.add(rf, rb);
+    terrain.add(shed);
+    for (let k = 0; k < 3; k++) {
+      const bed = grp('beet').at(-9.5 + k * 1.7, 0, -10);
+      bed.add(box(1.4, 0.18, 2.4, 0x7a4f33).at(0, 0.09, 0), box(1.2, 0.04, 2.2, 0x5b3d28).at(0, 0.19, 0));
+      for (let j = 0; j < 4; j++) bed.add(new Node(G.sphere(0.2, 5, 3), { color: hex(k === 1 ? 0xe8505b : 0x4fb85a) }).at(-0.3 + (j % 2) * 0.6, 0.3, -0.8 + j * 0.5));
+      terrain.add(bed);
+    }
+  }
   const bins = [makeBin(0x6f7a84), makeBin(0xf2c94c), makeBin(0x3f93ea)];
   bins.forEach((b, i) => { b.at(-8.0 - i * 0.9, 0, 6.6); terrain.add(b); });
   root.add(terrain);
@@ -259,6 +284,25 @@ export function buildHouse(engine) {
     const oldF = grp('alt'); oldF.add(box(w, h, 0.12, C.frameOld), box(w - 0.22, h - 0.22, 0.16, C.glassOld));
     const newF = grp('neu'); newF.add(box(w, h, 0.14, C.frameNew), box(w - 0.2, h - 0.2, 0.18, C.glass));
     if (kind === 'win') newF.add(box(0.05, h - 0.2, 0.2, C.frameNew).at(0, 0, 0));
+    if (kind === 'win' && h >= 1.3) newF.add(box(w - 0.2, 0.045, 0.2, C.frameNew).at(0, h * 0.16, 0));
+    if (kind === 'win' && w >= 1.5) newF.add(box(0.045, h - 0.2, 0.2, C.frameNew).at(-w / 4, 0, 0), box(0.045, h - 0.2, 0.2, C.frameNew).at(w / 4, 0, 0));
+    if (kind === 'win' && lvl === 'eg' && edge === 0) {
+      // grüne Fensterläden mit Lamellen, Blumenkasten mit Blüten
+      for (const sg of [-1, 1]) {
+        const sh = grp('laden').at(sg * (w / 2 + 0.3), 0, 0.06);
+        sh.add(box(0.46, h + 0.04, 0.06, 0x3f7d5a));
+        for (let k = 0; k < 5; k++) sh.add(box(0.36, 0.03, 0.08, 0x2f6a4a).at(0, -h * 0.36 + k * h * 0.18, 0.02));
+        newF.add(sh);
+      }
+    }
+    if (kind === 'win' && lvl === 'eg' && edge === 0) {
+      const fb = grp('blumenkasten').at(0, -h / 2 - 0.26, 0.3);
+      fb.add(box(w + 0.1, 0.22, 0.3, 0x8a5a36), box(w + 0.02, 0.05, 0.32, 0x6d4529).at(0, 0.1, 0));
+      const cols = [0xe8505b, 0xffd23f, 0xf7a1c4, 0xffffff, 0xe8505b, 0xffd23f];
+      const nF = Math.max(3, Math.round(w / 0.32));
+      for (let k = 0; k < nF; k++) fb.add(new Node(G.sphere(0.12, 5, 3), { color: hex(k % 3 === 1 ? 0x4fb85a : cols[k % cols.length]) }).at(-w / 2 + 0.2 + k * ((w - 0.4) / (nF - 1)), 0.2, (k % 2) * 0.05));
+      g.add(fb);
+    }
     if (kind === 'door') newF.add(box(0.08, 0.1, 0.22, 0x555a60).at(w / 2 - 0.2, 0, 0));
     g.add(hole, oldF, newF);
     if (kind === 'win') g.add(box(w + 0.36, 0.09, 0.36, 0xe9e2d3).at(0, -h / 2 - 0.05, 0.1), box(w + 0.2, 0.1, 0.14, 0xb08a5a).at(0, h / 2 + 0.07, 0.03));
@@ -284,6 +328,23 @@ export function buildHouse(engine) {
   mkWindow('eg', 2, 3.3, 1.2, 1.2, ey + 0.2);
   mkWindow('eg', 1, 3.0, 1.2, 1.4, ey);
   mkWindow('eg', 1, 12.4, 1.2, 1.4, ey);
+  // Details am Erdgeschoss: Fallrohre an den Ecken, Wandlaterne und Hausnummer an der Haustür
+  geo.egW.edges.forEach((e, i) => {
+    if (i % 3 !== 0) return;
+    const pipe = new Node(G.cyl(0.05, 0.05, DIM.hEG - 0.2, 6), { color: hex(0x8a929a) });
+    pipe.at(e.p[0] + e.d[0] * 0.2 + e.out[0] * 0.26, DIM.egY + (DIM.hEG - 0.2) / 2 + 0.1, e.p[1] + e.d[1] * 0.2 + e.out[1] * 0.26);
+    floors.eg.shell.add(pipe);
+  });
+  {
+    const e = geo.egW.edges[2];
+    const at = (a, y, o) => [e.p[0] + e.d[0] * a + e.out[0] * o, y, e.p[1] + e.d[1] * a + e.out[1] * o];
+    const lamp = grp('wandlaterne').at(...at(2.2, DIM.egY + 1.75, 0.22)).rotate(0, Math.atan2(e.out[0], e.out[1]), 0);
+    lamp.add(box(0.1, 0.1, 0.16, 0x4a4f56).at(0, 0.2, -0.04), box(0.2, 0.3, 0.2, 0xffd36a, { emissive: 0.4 }), box(0.24, 0.05, 0.24, 0x4a4f56).at(0, 0.18, 0));
+    const nr = grp('hausnummer').at(...at(2.2, DIM.egY + 1.25, 0.2)).rotate(0, Math.atan2(e.out[0], e.out[1]), 0);
+    nr.add(box(0.3, 0.22, 0.04, 0xf4f1ea), box(0.06, 0.12, 0.05, 0x35383e).at(-0.07, 0, 0.01), box(0.06, 0.12, 0.05, 0x35383e).at(0.07, 0, 0.01));
+    const mat = box(0.9, 0.04, 0.6, 0x7a4f33).at(...at(1.2, DIM.egY + 0.02, 0.55)).rotate(0, Math.atan2(e.out[0], e.out[1]), 0);
+    floors.eg.shell.add(lamp, nr, mat);
+  }
   const dy = DIM.dgY + 0.5;
   // Gauben (links und rechts, nah am Rand): Fenster in der Gaubenfront
   const dormerU = [2.04, 12.84];
