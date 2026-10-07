@@ -1,6 +1,6 @@
 // Service Worker: hält die App-Dateien offline bereit. Daten laufen nie über den Cache
 // (die liegen im lokalen Speicher bzw. in OneDrive).
-const CACHE = 'bautagebuch-v27';
+const CACHE = 'bautagebuch-v28';
 const SHELL = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'js/main.js', 'js/ui.js', 'js/store.js', 'js/auth.js', 'js/onedrive.js', 'js/session.js', 'js/phases.js', 'js/icons.js',
   'js/charts.js', 'js/theme.js', 'js/weather.js', 'js/finance.js', 'js/ink.js', 'js/splash.js', 'js/backup.js', 'js/docrules.js', 'js/pdf.js', 'js/haus.js', 'js/haus-view.js', 'js/anim.js', 'js/actors.js', 'js/mini3d.js', 'js/config.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/icon-180.png', 'icons/icon-maskable-512.png', 'icons/favicon-32.png'];
 

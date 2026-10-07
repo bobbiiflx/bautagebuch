@@ -1320,18 +1320,32 @@ function docEditForm(d) {
   });
 }
 
-// Filterleiste der Dokumente: Kategorie, Gewerk, Tag und Angepinnt – kombinierbar
-const docF = { cat: '', phase: '', tag: '', pin: false };
-const selPill = (ic, value, options, onch, any) => h('label', { class: 'pillsel' + (value ? ' on' : '') }, icon(ic, { size: 18 }), h('select', { value, onchange: (e) => onch(e.target.value), 'aria-label': any }, h('option', { value: '' }, any), options.map(([v, t]) => h('option', { value: v, selected: v === value }, t))));
-const docMatches = (d, f) => (!f.cat || docCat(d) === f.cat) && (!f.phase || d.phaseId === f.phase) && (!f.tag || (d.tags || []).includes(f.tag)) && (!f.pin || d.pinned);
+// Filterleiste der Dokumente: Kategorie, Gewerk, Tag (je mit Mehrfachauswahl) und Angepinnt – die Filter gelten gemeinsam
+const docF = { cat: new Set(), phase: new Set(), tag: new Set(), pin: false };
+const CAT_ICONS = { 'Verträge': 'edit_note', 'Pläne': 'straighten', 'Rechnungen': 'receipt_long', 'Angebote': 'request_quote', 'Genehmigungen': 'task_alt', 'Fotos': 'photo_camera', 'Sonstiges': 'attach_file' };
+const docMatches = (d, f) => (!f.cat.size || f.cat.has(docCat(d))) && (!f.phase.size || f.phase.has(d.phaseId)) && (!f.tag.size || (d.tags || []).some((t) => f.tag.has(t))) && (!f.pin || d.pinned);
+
+// Auswahlfeld als Pille: Tipp öffnet eine Liste mit Häkchen (Mehrfachauswahl) und Icons
+function multiPill(ic, title, any, options /* [{v, t, icon}] */, chosen, onChange) {
+  const names = options.filter((o) => chosen.has(o.v)).map((o) => o.t);
+  const text = !names.length ? any : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
+  return h('button', { type: 'button', class: 'pillsel multi' + (names.length ? ' on' : ''), 'aria-label': title, onclick: () => {
+    const rows = options.map((o) => h('label', { class: 'mrow' },
+      h('input', { type: 'checkbox', checked: chosen.has(o.v), onchange: (e) => { e.target.checked ? chosen.add(o.v) : chosen.delete(o.v); onChange(); } }),
+      o.icon, h('span', { class: 'mt' }, o.t)));
+    const dlg = sheet(title, [rows.length ? h('div', { class: 'mlist' }, rows) : h('p', { class: 'muted small' }, 'Noch nichts vorhanden.'),
+      h('button', { type: 'button', class: 'btn block', onclick: () => { chosen.clear(); rows.forEach((r) => (r.querySelector('input').checked = false)); onChange(); } }, 'Auswahl aufheben')], { noSave: true });
+  } }, icon(ic, { size: 18 }), h('span', {}, text), icon('expand_more', { size: 18 }));
+}
 
 function viewDocs() {
   const all = Store.all('documents').sort(byDateDesc);
   const list = all.filter((d) => docMatches(d, docF));
   const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
   const set = (patch) => { Object.assign(docF, patch); render(); };
-  const active = docF.cat || docF.phase || docF.tag || docF.pin;
+  const active = docF.cat.size || docF.phase.size || docF.tag.size || docF.pin;
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
+  const tagIds = allDocTags().filter((t) => all.some((d) => (d.tags || []).includes(t)));
   const row = (d) => {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
@@ -1347,11 +1361,11 @@ function viewDocs() {
     'div',
     { class: 'view' },
     h('div', { class: 'pills dfilters' },
-      selPill('folder', docF.cat, DOC_CATEGORIES.map((c) => [c, c]), (v) => set({ cat: v }), 'Alle Kategorien'),
-      selPill('layers', docF.phase, phaseIds.map((id) => [id, phaseName(id)]), (v) => set({ phase: v }), 'Alle Gewerke'),
-      selPill('texture', docF.tag, allDocTags().filter((t) => all.some((d) => (d.tags || []).includes(t))).map((t) => [t, '#' + t]), (v) => set({ tag: v }), 'Alle Tags'),
+      multiPill('folder', 'Kategorien', 'Alle Kategorien', DOC_CATEGORIES.map((c) => ({ v: c, t: c, icon: icon(CAT_ICONS[c] || 'folder', { size: 22 }) })), docF.cat, () => render()),
+      multiPill('layers', 'Gewerke', 'Alle Gewerke', phaseIds.map((id) => ({ v: id, t: phaseName(id), icon: phaseIcon({ id }, { size: 22 }) })), docF.phase, () => render()),
+      multiPill('sell', 'Tags', 'Alle Tags', tagIds.map((t) => ({ v: t, t: '#' + t, icon: icon('sell', { size: 22 }) })), docF.tag, () => render()),
       h('button', { class: 'pill small' + (docF.pin ? ' on' : ''), 'aria-pressed': String(docF.pin), onclick: () => set({ pin: !docF.pin }) }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt'),
-      active ? h('button', { class: 'btn-text small', onclick: () => set({ cat: '', phase: '', tag: '', pin: false }) }, 'Zurücksetzen') : null),
+      active ? h('button', { class: 'btn-text small', onclick: () => { docF.cat.clear(); docF.phase.clear(); docF.tag.clear(); docF.pin = false; render(); } }, 'Zurücksetzen') : null),
     list.length
       ? [pinned.length && rest.length ? h('div', { class: 'sub' }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt') : null,
          pinned.length ? h('div', { class: 'card' }, pinned.map(row)) : null,
