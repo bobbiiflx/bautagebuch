@@ -5,7 +5,8 @@ import * as Session from './session.js';
 import { Remote } from './onedrive.js';
 import { CONFIG } from './config.js';
 import { hausView } from './haus-view.js';
-import { icon } from './icons.js';
+import { icon, phaseIcon } from './icons.js';
+import { donut, stackBar, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
 
 // ---------- Hilfsfunktionen ----------
@@ -221,8 +222,8 @@ function photoField(initial = []) {
     h(
       'div',
       { class: 'row' },
-      h('button', { type: 'button', class: 'btn', onclick: () => cam.click() }, '📷 Foto aufnehmen'),
-      h('button', { type: 'button', class: 'btn', onclick: () => gal.click() }, '🖼️ Aus Galerie')
+      h('button', { type: 'button', class: 'btn', onclick: () => cam.click() }, icon('photo_camera', { size: 20 }), ' Foto aufnehmen'),
+      h('button', { type: 'button', class: 'btn', onclick: () => gal.click() }, icon('image', { size: 20 }), ' Aus Galerie')
     ),
     status,
     cam,
@@ -287,13 +288,10 @@ function viewHome() {
       { class: 'card hero' },
       h('div', { class: 'hero-top' }, h('div', { class: 'pct' }, pct + '%'), h('div', {}, h('div', { class: 'hero-t' }, 'Baufortschritt'), h('div', { class: 'muted' }, `${done} von ${ph.length} Phasen fertig`))),
       bar(pct),
-      running.length ? h('div', { class: 'chips' }, running.map((p) => chip(`${p.icon || '🔧'} ${p.name} · ${p.progress}%`, 'run'))) : next && h('div', { class: 'muted small' }, `Als Nächstes geplant: ${next.name}`)
-    ),
-    card(
-      '3D-Haus',
-      h('p', { class: 'muted' }, 'Euer Haus als Low-Poly-Modell. Es zeigt genau die Phasen, die ihr als fertig markiert habt – egal in welcher Reihenfolge.'),
-      h('a', { class: 'btn primary', href: '#/haus', onclick: (e) => { e.preventDefault(); go('haus'); } }, 'Haus ansehen'),
-      h('div', { class: 'chips' }, ph.map((p) => chip(`${p.icon || '🔧'} ${p.name.split(' ')[0].replace(',', '')}`, p.state === 'fertig' ? 'done' : p.state === 'laeuft' ? 'run' : 'dim')))
+      running.length || done ? h('div', { class: 'chips' },
+        running.map((p) => chip([phaseIcon(p, { size: 15 }), ` ${p.name} · ${p.progress}%`], 'run')),
+        ph.filter((p) => p.state === 'fertig').map((p) => chip([phaseIcon(p, { size: 15 }), ` ${p.name.split(' ')[0].replace(',', '')}`], 'done'))) : null,
+      !running.length && next && h('div', { class: 'muted small' }, `Als Nächstes geplant: ${next.name}`)
     ),
     h(
       'div',
@@ -412,44 +410,100 @@ function budgetForm() {
 }
 
 let costFilter = { phase: '', status: '' };
+let costTab = 'auswertung';
+
+// Diagramm-Karte mit Umschalter Grafik / Tabelle (für alle, die Zahlen lieber lesen)
+function chartCard(title, chart, legendEl, rows, note) {
+  let table = false;
+  const body = h('div', { class: 'viz' });
+  const btn = h('button', { class: 'icon-btn small', 'aria-label': 'Als Tabelle anzeigen', 'aria-pressed': 'false', onclick: () => { table = !table; btn.setAttribute('aria-pressed', String(table)); btn.setAttribute('aria-label', table ? 'Als Grafik anzeigen' : 'Als Tabelle anzeigen'); paint(); } }, icon('table_chart', { size: 20 }));
+  const paint = () => body.replaceChildren(table
+    ? h('table', { class: 'viz-table' }, h('tbody', {}, rows.map(([l, v]) => h('tr', {}, h('th', { scope: 'row' }, l), h('td', {}, v)))))
+    : h('div', {}, chart, legendEl, note && h('p', { class: 'muted small' }, note)));
+  paint();
+  return h('section', { class: 'card chart' }, h('div', { class: 'split' }, h('h3', {}, title), btn), body);
+}
+
+function costCharts(all, sums, budget) {
+  const real = all.filter((c) => c.status !== 'angebot');
+  if (!real.length) return h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Sobald Rechnungen eingetragen sind, erscheinen hier die Auswertungen.'));
+  const out = [];
+
+  // 1) Budget-Auslastung
+  if (budget) {
+    const paid = Math.max(0, sums.net - sums.open), openV = Math.min(sums.open, Math.max(0, sums.net)), rest = Math.max(0, budget - sums.net);
+    const segs = [{ label: 'Bezahlt (netto)', value: paid, color: 'var(--viz-1)' }, { label: 'Offene Rechnungen', value: openV, color: 'var(--viz-2)' }, { label: 'Noch verfügbar', value: rest, color: 'var(--viz-track)' }];
+    const over = sums.net - budget;
+    out.push(chartCard('Budget-Auslastung', stackBar(segs, Math.max(budget, sums.net)),
+      h('div', {}, legend(segs.map((x) => ({ ...x, text: `${fmtEUR(x.value)} · ${Math.round((x.value / budget) * 100)} %` }))), over > 0 && h('p', { class: 'viz-warn' }, icon('warning', { filled: true, size: 18 }), ` Budget um ${fmtEUR(over)} überschritten`)),
+      [['Budget', fmtEUR(budget)], ...segs.map((x) => [x.label, fmtEUR(x.value)])]));
+  }
+
+  // 2) Verteilung auf Gewerke
+  const usages = [...phases(), ...tradeOptions()];
+  let items = usages.map((u) => ({ label: u.name, value: sum(real.filter((c) => c.phaseId === u.id), (c) => c.amount) })).filter((x) => x.value > 0);
+  const none = sum(real.filter((c) => !usageById(c.phaseId)), (c) => c.amount);
+  if (none > 0) items.push({ label: 'Ohne Zuordnung', value: none });
+  items.sort((a, b) => b.value - a.value);
+  const top = items.slice(0, 5), restSum = sum(items.slice(5), (x) => x.value);
+  const slices = top.map((x, i) => ({ ...x, color: `var(--viz-${i + 1})` }));
+  if (restSum > 0) slices.push({ label: items.length - 5 === 1 ? items[5].label : `Weitere (${items.length - 5})`, value: restSum, color: 'var(--viz-other)' });
+  const tot = sum(slices, (x) => x.value);
+  out.push(chartCard('Ausgaben je Gewerk', donut(slices, short(tot), 'brutto'), legend(slices.map((x) => ({ ...x, text: `${fmtEUR(x.value)} · ${Math.round((x.value / tot) * 100)} %` }))), items.map((x) => [x.label, fmtEUR(x.value)])));
+
+  // 3) + 4) Monatsverlauf
+  const byM = {};
+  for (const c of real) { const k = (c.date || '').slice(0, 7); if (k) byM[k] = (byM[k] || 0) + (Number(c.amount) || 0); }
+  const keys = Object.keys(byM).sort();
+  if (keys.length) {
+    const [y0, m0] = keys[0].split('-').map(Number), [y1, m1] = keys[keys.length - 1].split('-').map(Number);
+    let months = [];
+    for (let y = y0, m = m0; y < y1 || (y === y1 && m <= m1); m++) { if (m > 12) { m = 1; y++; if (y > y1) break; } months.push(`${y}-${String(m).padStart(2, '0')}`); if (y === y1 && m === m1) break; }
+    months = months.slice(-12);
+    const data = months.map((k) => ({ key: k, label: monthLabel(k), value: byM[k] || 0 }));
+    out.push(chartCard('Ausgaben pro Monat', monthBars(data), h('p', { class: 'muted small' }, 'Brutto, nach Rechnungsdatum.'), data.map((d) => [d.label, fmtEUR(d.value)])));
+    let run = sum(keys.filter((k) => !months.includes(k) && k < months[0]).map((k) => ({ v: byM[k] })), (x) => x.v);
+    const cum = data.map((d) => ({ label: d.label, value: (run += d.value) }));
+    out.push(chartCard('Verlauf gegen Budget', cumLine(cum, budget), legend([{ label: 'Ausgaben insgesamt (brutto)', color: 'var(--viz-1)', text: fmtEUR(run) }, budget ? { label: 'Budget', color: 'var(--viz-ref)', text: fmtEUR(budget) } : null].filter(Boolean)), cum.map((d) => [d.label, fmtEUR(d.value)])));
+  }
+
+  // 5) Förderungen
+  if (sums.subPaid + sums.subOpen > 0) {
+    const segs = [{ label: 'Ausgezahlt', value: sums.subPaid, color: 'var(--viz-3)' }, { label: 'Noch ausstehend', value: sums.subOpen, color: 'var(--viz-4)' }];
+    out.push(chartCard('Förderungen', stackBar(segs), legend(segs.map((x) => ({ ...x, text: fmtEUR(x.value) }))), [...segs.map((x) => [x.label, fmtEUR(x.value)]), ['Gesamt', fmtEUR(sums.subPaid + sums.subOpen)]]));
+  }
+  return h('div', { class: 'view-inner' }, out);
+}
+
 function viewCosts() {
   const all = Store.all('costs');
-  const { spent, subPaid, subOpen, net, open, offers } = costSums(all);
+  const sums = costSums(all);
+  const { spent, subPaid, subOpen, net, open, offers } = sums;
   const budget = budgetInfo();
   const parts = budgetParts();
   let list = all.filter((c) => (!costFilter.phase || c.phaseId === costFilter.phase) && (!costFilter.status || c.status === costFilter.status)).sort(byDateDesc);
-
   const usages = [...phases(), ...tradeOptions()];
-  const perPhase = usages
-    .map((p) => ({ p, v: sum(all.filter((c) => c.phaseId === p.id && c.status !== 'angebot'), (c) => c.amount) }))
-    .filter((x) => x.v > 0);
-  const other = sum(all.filter((c) => c.status !== 'angebot' && !usageById(c.phaseId)), (c) => c.amount);
-  const max = Math.max(1, ...perPhase.map((x) => x.v), other);
 
   const fPhase = h('select', { value: costFilter.phase, onchange: (e) => { costFilter.phase = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Gewerke'), usages.map((p) => h('option', { value: p.id }, p.name)));
   const fStatus = h('select', { value: costFilter.status, onchange: (e) => { costFilter.status = e.target.value; render(); } }, h('option', { value: '' }, 'Alle Status'), optionList(COST_STATES, costFilter.status));
+  const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Rechnungen (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
 
-  return h(
-    'div',
-    { class: 'view' },
-    h(
-      'div',
-      { class: 'stats' },
+  const summary = [
+    h('div', { class: 'stats' },
       stat('Ausgaben (netto)', fmtEUR(net), budget ? `${fmtEUR(budget - net)} vom Budget übrig` : null, budget && net > budget ? 'bad' : ''),
       stat('Davon offen', fmtEUR(open)),
       stat('Ausgaben brutto', fmtEUR(spent)),
       stat('Angebote', fmtEUR(offers)),
       stat('Förderung ausgezahlt', fmtEUR(subPaid)),
-      stat('Förderung ausstehend', fmtEUR(subOpen), subOpen ? 'noch nicht ausgezahlt' : null, subOpen ? 'warn' : '')
-    ),
+      stat('Förderung ausstehend', fmtEUR(subOpen), subOpen ? 'noch nicht ausgezahlt' : null, subOpen ? 'warn' : '')),
     h('section', { class: 'card budget', onclick: budgetForm },
       h('div', { class: 'split' }, h('h3', {}, 'Budget'), h('strong', { class: 'amount' }, budget ? fmtEUR(budget) : '–')),
       parts.length
         ? parts.map((p) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(p.amount)), bar(budget ? (p.amount / budget) * 100 : 0)))
         : h('p', { class: 'muted small' }, 'Antippen, um das Budget festzulegen – auch in mehreren Teilen (Eigenkapital, Kredit …).')),
-    perPhase.length || other
-      ? card('Ausgaben je Gewerk', [...perPhase.map(({ p, v }) => h('div', { class: 'brow' }, h('span', {}, p.name), h('span', { class: 'muted' }, fmtEUR(v)), bar((v / max) * 100))), other ? h('div', { class: 'brow' }, h('span', {}, 'Ohne Zuordnung'), h('span', { class: 'muted' }, fmtEUR(other)), bar((other / max) * 100)) : null])
-      : null,
+    costCharts(all, sums, budget),
+  ];
+  const invoices = [
     h('div', { class: 'filters' }, fPhase, fStatus),
     list.length
       ? list.map((c) =>
@@ -464,8 +518,8 @@ function viewCosts() {
           )
         )
       : empty('Keine Kosten', 'Trage Rechnungen, Abschläge und Angebote ein und fotografiere die Belege.'),
-    fab(() => costForm())
-  );
+  ];
+  return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? summary : invoices, fab(() => costForm()));
 }
 
 // ---------- Ansicht: Mängel ----------
@@ -544,7 +598,7 @@ function viewTodos() {
       'div',
       { class: 'todo' + (t.done ? ' done' : '') },
       h('input', { type: 'checkbox', checked: t.done, 'aria-label': 'Erledigt', onchange: (e) => Store.save('todos', { ...t, done: e.target.checked }) }),
-      h('div', { class: 'todo-t', onclick: () => todoForm(t) }, h('div', {}, t.title), h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? '⚠ überfällig · ' : '') + fmtDate(t.due), t.assignee, phaseName(t.phaseId)].filter(Boolean).join(' · ')))
+      h('div', { class: 'todo-t', onclick: () => todoForm(t) }, h('div', {}, t.title), h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? 'überfällig · ' : '') + fmtDate(t.due), t.assignee, phaseName(t.phaseId)].filter(Boolean).join(' · ')))
     );
   const quick = h('input', { type: 'text', placeholder: 'Neue Aufgabe …', enterkeyhint: 'done' });
   const add = async () => {
@@ -559,7 +613,7 @@ function viewTodos() {
     { class: 'view' },
     h('div', { class: 'quickadd' }, quick, h('button', { class: 'btn primary', onclick: add }, 'Hinzufügen')),
     open.length ? h('div', { class: 'card' }, open.map(row)) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.'),
-    done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, `${showDone ? '▾' : '▸'} Erledigt (${done.length})`) : null,
+    done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, icon(showDone ? 'expand_less' : 'expand_more', { size: 20 }), ` Erledigt (${done.length})`) : null,
     showDone && done.length ? h('div', { class: 'card' }, done.map(row)) : null
   );
 }
@@ -583,7 +637,7 @@ async function movePhase(p, dir) {
 }
 
 function phaseForm(entry) {
-  const e = entry || { name: '', icon: '🔧', state: 'geplant', progress: 0, start: '', end: '', note: '', order: (Math.max(0, ...phases().map((p) => p.order)) || 0) + 10 };
+  const e = entry || { name: '', state: 'geplant', progress: 0, start: '', end: '', note: '', order: (Math.max(0, ...phases().map((p) => p.order)) || 0) + 10 };
   const name = h('input', { type: 'text', required: true, value: e.name });
   const state = h('select', { value: e.state }, optionList(PHASE_STATES, e.state));
   const range = h('input', { type: 'range', min: 0, max: 100, step: 5, value: e.progress });
@@ -621,13 +675,13 @@ function viewPlan() {
         'article',
         { class: 'card phase ps-' + p.state },
         h('div', { class: 'phase-main', onclick: () => phaseForm(p) },
-          h('div', { class: 'split' }, h('h3', {}, `${p.icon || '🔧'} ${p.name}`), chip(PHASE_STATES.find((s) => s[0] === p.state)?.[1] || p.state, 'phs-' + p.state)),
+          h('div', { class: 'split' }, h('h3', { class: 'ph-title' }, phaseIcon(p, { size: 20 }), ' ', p.name), chip(PHASE_STATES.find((s) => s[0] === p.state)?.[1] || p.state, 'phs-' + p.state)),
           bar(p.progress),
           h('div', { class: 'muted small' }, [p.progress + ' %', p.start && 'ab ' + fmtDate(p.start), p.end && 'bis ' + fmtDate(p.end)].filter(Boolean).join(' · '))
         ),
         h('div', { class: 'movers' },
-          h('button', { class: 'mv', disabled: i === 0, 'aria-label': 'Nach oben', onclick: () => movePhase(p, -1) }, '▲'),
-          h('button', { class: 'mv', disabled: i === list.length - 1, 'aria-label': 'Nach unten', onclick: () => movePhase(p, 1) }, '▼'))
+          h('button', { class: 'mv', disabled: i === 0, 'aria-label': 'Nach oben', onclick: () => movePhase(p, -1) }, icon('arrow_upward', { size: 18 })),
+          h('button', { class: 'mv', disabled: i === list.length - 1, 'aria-label': 'Nach unten', onclick: () => movePhase(p, 1) }, icon('arrow_downward', { size: 18 })))
       )
     ),
     h('button', { class: 'btn block', onclick: () => phaseForm() }, '+ Eigene Phase hinzufügen')
@@ -637,7 +691,7 @@ function viewPlan() {
 // ---------- Ansicht: Dokumente ----------
 let docFilter = '';
 function docIcon(mime = '') {
-  return mime.includes('pdf') ? '📄' : mime.startsWith('image/') ? '🖼️' : mime.includes('sheet') || mime.includes('excel') ? '📊' : mime.includes('word') ? '📝' : '📎';
+  return icon(mime.includes('pdf') ? 'picture_as_pdf' : mime.startsWith('image/') ? 'image' : mime.includes('sheet') || mime.includes('excel') ? 'table_chart' : mime.includes('word') ? 'description' : 'attach_file', { size: 28 });
 }
 
 async function openDoc(d) {
@@ -678,7 +732,7 @@ function docAddForm() {
   const fileIn = h('input', { type: 'file', hidden: true, onchange: pick });
   const camIn = h('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: pick });
   sheet('Dokument hinzufügen', [
-    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => fileIn.click() }, '📁 Datei wählen'), h('button', { type: 'button', class: 'btn', onclick: () => camIn.click() }, '📷 Fotografieren')),
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: () => fileIn.click() }, icon('folder_open', { size: 20 }), ' Datei wählen'), h('button', { type: 'button', class: 'btn', onclick: () => camIn.click() }, icon('photo_camera', { size: 20 }), ' Fotografieren')),
     label, fileIn, camIn, field('Bezeichnung', name), field('Kategorie', cat), field('Gewerk / Phase', phase), field('Notiz', note),
   ], {
     onSave: async () => {
@@ -738,7 +792,7 @@ function viewSettings() {
     : !signed
     ? [h('p', { class: 'muted' }, 'Melde dich mit dem Microsoft-Konto an, auf dessen OneDrive die Daten liegen sollen (oder mit dem Konto, für das der Ordner freigegeben wurde).'), h('button', { class: 'btn primary block', onclick: () => Auth.login().catch((e) => toast(e.message)) }, 'Mit Microsoft anmelden')]
     : [
-        h('p', {}, '✅ Angemeldet als ', h('strong', {}, acc?.name || acc?.username || 'Microsoft-Konto')),
+        h('p', { class: 'signed' }, icon('check_circle', { filled: true, size: 20 }), ' Angemeldet als ', h('strong', {}, acc?.name || acc?.username || 'Microsoft-Konto')),
         !Session.hasTarget() && h('div', { class: 'note' }, h('strong', {}, 'Wo sollen die Daten liegen? '), 'Erste Person: im eigenen OneDrive. Zweite Person: im Ordner, den die erste Person geteilt hat (Link unten einfügen).'),
         !Session.hasTarget() && h('button', { class: 'btn primary block', onclick: () => switchTarget({ kind: 'own' }) }, `Eigenen OneDrive-Ordner „${CONFIG.rootFolder}“ verwenden`),
         Session.hasTarget() && h('div', { class: 'seg' },
@@ -790,14 +844,14 @@ async function switchTarget(t) {
 }
 
 // ---------- Gemeinsame Bausteine ----------
-const empty = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'empty-i' }, '🏗️'), h('strong', {}, title), h('p', { class: 'muted' }, text));
+const empty = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'empty-i' }, icon('construction', { size: 40 })), h('strong', {}, title), h('p', { class: 'muted' }, text));
 const fab = (fn) => h('button', { class: 'fab', 'aria-label': 'Hinzufügen', onclick: fn }, icon('add', { size: 28 }));
 
 function syncBadge() {
   const s = Store.getState();
-  const map = { local: ['dim', '● Nur lokal'], online: ['ok', '☁ Synchronisiert'], syncing: ['run', '⟳ Synchronisiere …'], offline: ['warn', '⚠ Offline'], auth: ['warn', '⚠ Anmeldung nötig'], error: ['bad', '⚠ Sync-Fehler'] };
-  const [cls, text] = s.mode === 'online' && !s.last ? ['run', '☁ Verbunden'] : map[s.mode] || map.local;
-  return h('span', { class: 'sync ' + cls }, text + (s.pending ? ` · ${s.pending} offen` : ''));
+  const map = { local: ['dim', 'cloud_off', 'Nur lokal'], online: ['ok', 'cloud_done', 'Synchronisiert'], syncing: ['run', 'cloud_sync', 'Synchronisiere …'], offline: ['warn', 'cloud_off', 'Offline'], auth: ['warn', 'error', 'Anmeldung nötig'], error: ['bad', 'error', 'Sync-Fehler'] };
+  const [cls, ic, text] = s.mode === 'online' && !s.last ? ['run', 'cloud_sync', 'Verbunden'] : map[s.mode] || map.local;
+  return h('span', { class: 'sync ' + cls }, icon(ic, { size: 16 }), ' ' + text + (s.pending ? ` · ${s.pending} offen` : ''));
 }
 
 // ---------- Rahmen und Navigation ----------
@@ -812,9 +866,10 @@ const ROUTES = {
   einstellungen: ['Einstellungen', viewSettings],
   haus: ['3D-Haus', () => hausView(phases())],
 };
-const NAV = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['maengel', 'warning', 'Mängel']];
-const MORE = [['aufgaben', 'task_alt', 'Aufgaben'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
+const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['maengel', 'warning', 'Mängel']];
+const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
 
+const ALL = [...NAV_, ...MORE_];
 const readHash = () => {
   const r = location.hash.replace(/^#\/?/, '');
   return r in ROUTES ? r : '';
@@ -830,11 +885,14 @@ export function go(r) {
 }
 const navClick = (k, after) => (e) => { e.preventDefault(); after?.(); go(k); };
 
-let root, headerSync, mainEl, navEl;
+let root, headerSync, mainEl, menuBtn;
 
-function openMore() {
-  const dlg = h('dialog', { class: 'sheet more' },
-    h('div', { class: 'sheet-body' }, MORE.map(([r, ic, t]) => h('a', { class: 'more-item', href: '#/' + r, onclick: navClick(r, () => dlg.close()) }, icon(ic, { size: 22 }), h('span', {}, t))), h('button', { class: 'btn block', onclick: () => dlg.close() }, 'Schließen')));
+function openMenu() {
+  const r = route();
+  const dlg = h('dialog', { class: 'drawer', 'aria-label': 'Menü' },
+    h('div', { class: 'drawer-head' }, h('strong', {}, 'Bautagebuch'), h('button', { class: 'icon-btn', 'aria-label': 'Menü schließen', onclick: () => dlg.close() }, icon('close', { size: 24 }))),
+    h('nav', { class: 'drawer-list' }, ALL.map(([k, ic, t]) => h('a', { href: '#/' + k, class: 'drawer-item' + (r === k ? ' on' : ''), 'aria-current': r === k ? 'page' : null, onclick: navClick(k, () => dlg.close()) }, icon(ic, { filled: r === k, size: 24 }), h('span', {}, t)))));
+  dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg);
   dlg.showModal();
@@ -853,10 +911,6 @@ export function render() {
   root.querySelector('.title').textContent = title;
   headerSync.replaceChildren(syncBadge());
   mainEl.replaceChildren(view());
-  navEl.replaceChildren(
-    ...NAV.map(([k, ic, t]) => h('a', { href: '#/' + k, class: r === k ? 'on' : '', 'aria-label': t, title: t, 'aria-current': r === k ? 'page' : null, onclick: navClick(k) }, h('span', { class: 'ic' }, icon(ic, { filled: r === k, size: 26 })))),
-    h('button', { class: MORE.some((m) => m[0] === r) ? 'on' : '', 'aria-label': 'Mehr', title: 'Mehr', onclick: openMore }, h('span', { class: 'ic' }, icon('more_horiz', { filled: MORE.some((m) => m[0] === r), size: 26 })))
-  );
   window.scrollTo(0, y);
 }
 
@@ -864,8 +918,8 @@ export function mount(el) {
   root = el;
   headerSync = h('button', { class: 'sync-btn', 'aria-label': 'Synchronisierung', onclick: () => go('einstellungen') });
   mainEl = h('main', {});
-  navEl = h('nav', { class: 'tabbar' });
-  root.append(h('header', { class: 'topbar' }, h('h1', { class: 'title' }, 'Bautagebuch'), headerSync), mainEl, navEl);
+  menuBtn = h('button', { class: 'icon-btn', 'aria-label': 'Menü öffnen', 'aria-haspopup': 'dialog', onclick: openMenu }, icon('menu', { size: 26 }));
+  root.append(h('header', { class: 'topbar' }, menuBtn, h('h1', { class: 'title' }, 'Bautagebuch'), headerSync), mainEl);
   const onNav = () => { const r = readHash(); if (r !== current) { current = r; window.scrollTo(0, 0); render(); } };
   addEventListener('hashchange', onNav);
   addEventListener('popstate', onNav);

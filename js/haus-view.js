@@ -2,6 +2,7 @@
 import { Engine } from './mini3d.js';
 import { buildHouse } from './haus.js';
 import { play, hasAnim } from './anim.js';
+import { icon, phaseIcon } from './icons.js';
 
 const el = (tag, attrs = {}, ...kids) => {
   const n = document.createElement(tag);
@@ -43,8 +44,8 @@ function init() {
   viewBtns = ['aussen', 'innen'].map((k) => el('button', { class: 'hseg', type: 'button', onclick: () => setView(k) }, k === 'aussen' ? 'Außen' : 'Innen'));
   floorBar = el('div', { class: 'hsegs floors' }, [['kg', 'Keller'], ['eg', 'Erdgeschoss'], ['dg', 'Dachgeschoss'], ['alle', 'Alle']].map(([k, t]) => el('button', { class: 'hseg', type: 'button', 'data-f': k, onclick: () => setView(null, k) }, t)));
   listEl = el('div', { class: 'haus-list' });
-  skipBtn = el('button', { class: 'btn small skip', type: 'button', hidden: true, onclick: () => { if (engine) engine.timeScale = 14; } }, '⏭ Überspringen');
-  const reset = el('button', { class: 'btn small', type: 'button', onclick: () => { engine?.flyTo(homeCam(), 900); } }, '⟲ Ansicht zurücksetzen');
+  skipBtn = el('button', { class: 'btn small skip', type: 'button', hidden: true, onclick: () => { if (engine) engine.timeScale = 14; } }, icon('skip_next', { size: 18 }), ' Überspringen');
+  const reset = el('button', { class: 'btn small', type: 'button', onclick: () => { engine?.flyTo(homeCam(), 900); } }, icon('restart_alt', { size: 18 }), ' Ansicht zurücksetzen');
   const animToggle = el('label', { class: 'check small' }, el('input', { type: 'checkbox', checked: LS.get('bt.hausAnim', true), onchange: (e) => LS.set('bt.hausAnim', e.target.checked) }), ' Animationen automatisch abspielen');
   wrap = el('div', { class: 'view haus' },
     el('section', { class: 'card haus-card' },
@@ -54,7 +55,7 @@ function init() {
       statusEl,
       el('div', { class: 'muted small' }, 'Ziehen: drehen · Zwei Finger: zoomen und verschieben')
     ),
-    el('section', { class: 'card' }, el('h2', {}, 'Bauphasen im Modell'), el('p', { class: 'muted small' }, 'Das Modell zeigt genau den Stand der Planung, unabhängig von der Reihenfolge. ▶ spielt die Animation der Phase noch einmal ab.'), listEl, animToggle)
+    el('section', { class: 'card' }, el('h2', {}, 'Bauphasen im Modell'), el('p', { class: 'muted small' }, 'Das Modell zeigt genau den Stand der Planung, unabhängig von der Reihenfolge. Mit der Wiedergabetaste startest du die Animation einer Phase noch einmal.'), listEl, animToggle)
   );
   paintSegs();
 }
@@ -78,10 +79,10 @@ function paintList() {
   listEl.replaceChildren(...latest.map((p) => {
     const v = progressOf(p);
     return el('div', { class: 'line haus-row' },
-      el('span', { class: 'ic' }, p.icon || '🔧'),
+      el('span', { class: 'ic' }, phaseIcon(p, { size: 22 })),
       el('div', { class: 'grow' }, el('div', {}, p.name), el('div', { class: 'bar small' }, el('div', { style: `width:${v}%` }))),
       el('span', { class: 'muted small' }, v + '%'),
-      el('button', { class: 'btn small', type: 'button', 'aria-label': 'Animation abspielen: ' + p.name, onclick: () => replay(p.id), disabled: !house }, '▶')
+      el('button', { class: 'btn small', type: 'button', 'aria-label': 'Animation abspielen: ' + p.name, onclick: () => replay(p.id), disabled: !house }, icon('play_arrow', { size: 20 }))
     );
   }));
 }
@@ -89,7 +90,7 @@ function paintList() {
 async function run(id, label) {
   if (!house || playing) return;
   playing = true;
-  statusEl.textContent = '🎬 ' + label;
+  statusEl.textContent = 'Animation: ' + label;
   const real = mapOf(latest);
   const keepView = { view, floor };
   try {

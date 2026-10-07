@@ -2,22 +2,22 @@
 // Die IDs sind fest, damit beide Geräte dieselben Phasen kennen und das 3D-Haus später jede Phase
 // unabhängig von ihrer Position in der Reihenfolge zeigen kann.
 export const DEFAULT_PHASES = [
-  { id: 'oeltank', name: 'Öltank entfernen', icon: '🛢️' },
-  { id: 'entkernung', name: 'Entkernung', icon: '🔨' },
-  { id: 'aufstockung', name: 'Aufstockung / Rohbau', icon: '🧱' },
-  { id: 'dach', name: 'Dach (Dachstuhl & Eindeckung)', icon: '🏠' },
-  { id: 'elektro', name: 'Elektro', icon: '⚡' },
-  { id: 'sanitaer', name: 'Sanitär, Heizung & Fußbodenheizung', icon: '🚿' },
-  { id: 'fenster', name: 'Fenster', icon: '🪟' },
-  { id: 'daemmung', name: 'Dämmung', icon: '🧶' },
-  { id: 'fassade', name: 'Fassade / Putz', icon: '🎨' },
-  { id: 'estrich', name: 'Estrich', icon: '🏗️' },
-  { id: 'trockenbau', name: 'Trockenbau', icon: '📐' },
-  { id: 'maler', name: 'Maler', icon: '🖌️' },
-  { id: 'boeden', name: 'Böden', icon: '🪵' },
-  { id: 'kueche', name: 'Küche', icon: '🍳' },
-  { id: 'solar', name: 'Solar', icon: '☀️' },
-  { id: 'aussentreppe', name: 'Außentreppe', icon: '🪜' },
+  { id: 'oeltank', name: 'Öltank entfernen' },
+  { id: 'entkernung', name: 'Entkernung' },
+  { id: 'aufstockung', name: 'Aufstockung / Rohbau' },
+  { id: 'dach', name: 'Dach (Dachstuhl & Eindeckung)' },
+  { id: 'elektro', name: 'Elektro' },
+  { id: 'sanitaer', name: 'Sanitär, Heizung & Fußbodenheizung' },
+  { id: 'fenster', name: 'Fenster' },
+  { id: 'daemmung', name: 'Dämmung' },
+  { id: 'fassade', name: 'Fassade / Putz' },
+  { id: 'estrich', name: 'Estrich' },
+  { id: 'trockenbau', name: 'Trockenbau' },
+  { id: 'maler', name: 'Maler' },
+  { id: 'boeden', name: 'Böden' },
+  { id: 'kueche', name: 'Küche' },
+  { id: 'solar', name: 'Solar' },
+  { id: 'aussentreppe', name: 'Außentreppe' },
 ].map((p, i) => ({ ...p, order: (i + 1) * 10, state: 'geplant', progress: 0, start: '', end: '', note: '' }));
 
 export const PHASE_STATES = [
