@@ -207,7 +207,7 @@ dialog.lightbox[open] { display: flex; }
 .todo:first-child { border-top: 0; }
 .todo.done .todo-t { text-decoration: line-through; opacity: .55; }
 .todo-t { flex: 1; cursor: pointer; }
-.phase { flex-direction: row; align-items: center; gap: 10px; }
+.phase { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 10px; }
 .phase-main { flex: 1; display: flex; flex-direction: column; gap: 6px; cursor: pointer; min-width: 0; }
 .ps-fertig { opacity: .85; }
 .movers { display: flex; flex-direction: column; gap: 4px; }
@@ -317,3 +317,7 @@ dialog.drawer::backdrop { background: rgba(10,12,16,.45); }
 .phase.dragging { position: relative; z-index: 5; box-shadow: 0 12px 32px rgba(0,0,0,.22); transition: none; scale: 1.02; }
 .phase.dragging .grip { cursor: grabbing; color: var(--accent); }
 .phase.dragging, .phase.dragging * { user-select: none; -webkit-user-select: none; }
+
+.ph-todos { flex: 0 0 100%; border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; }
+.ph-todo-list { padding-left: 4px; }
+.btn-text.small { font-size: .88rem; }
