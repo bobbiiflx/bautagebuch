@@ -1624,7 +1624,118 @@ async function kueche(ctx) {
   await driveTo(van, [40, STREET_Y, 15.4], 2600, ease.in, false);
 }
 
-export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler, boeden, kueche };
+// ---------- Außentreppe (B): fertige Stahlwendeltreppe per Autokran ----------
+async function aussentreppe(ctx) {
+  const { engine, house, fx } = ctx;
+  const T = tools(ctx);
+  const { S, tw, wait, mk, walkTo, driveTo, burst, puff } = T;
+  const real = house.parts.stair, rp = real.parts;
+  house.setView('aussen');
+  // Fertigteil: Kopie der echten Treppe, um ihren Fußpunkt zentriert, damit sie sich leicht heben und aufklappen lässt
+  const steps = rp.steps;
+  const px = steps.reduce((a, s) => a + s.pos[0], 0) / steps.length, pz = steps.reduce((a, s) => a + s.pos[2], 0) / steps.length;
+  const cloneN = (n, shift) => {
+    const c = new Node(n.geo, { color: n.color, shadow: n.shadow });
+    c.pos = [...n.pos]; c.rot = [...n.rot]; c.scale = [...n.scale];
+    if (shift) { c.pos[0] -= px; c.pos[2] -= pz; }
+    for (const k of n.children) c.add(cloneN(k, shift));
+    return c;
+  };
+  const pf = grp('fertigtreppe');
+  const pfSteps = steps.map((s) => cloneN(s, true)), pfLanding = cloneN(rp.landing, true);
+  const pfRail = grp('gelaender'); rp.rail.children.forEach((k) => pfRail.add(cloneN(k, true)));
+  pf.add(...pfSteps, pfLanding, pfRail);
+  const zRow = 15.2, cx = 9.0, truckX = 1.2;
+  const outside = new Node(null); fx.add(outside);
+  outside.add(pf);
+  // 1) Autokran und Sattelzug mit der Treppe
+  engine.flyTo({ az: 0.25, el: 0.32, r: 40, target: [3, 3, 8] }, S(1400));
+  const crane = makeCrane(); crane.at(-34, STREET_Y, zRow); fx.add(crane, crane.rig);
+  const Hrest = [cx, 6.5, zRow - 3.5];
+  crane.aim(Hrest);
+  const truck = A.makeSkipTruck(); truck.at(-48, STREET_Y, zRow); outside.add(truck);
+  // Treppe liegt flachgeklappt auf der Ladefläche (Pivot = Fußpunkt-Mitte)
+  const LAY = [0.42, 0.14, 0.42];
+  const bedOff = [-3.0, 0.95, 0];
+  const bedPos = () => [truck.pos[0] + bedOff[0], truck.pos[1] + bedOff[1] + 0.2, truck.pos[2] + bedOff[2]];
+  const placeOnBed = () => { const b = bedPos(); pf.at(b[0], b[1], b[2]); pf.rot[1] = Math.PI / 2; pf.size(...LAY); };
+  placeOnBed();
+  await Promise.all([
+    driveTo(crane, [cx, STREET_Y, zRow], 3200, ease.out),
+    (async () => { await wait(900); await tw(3000, (t) => { truck.pos[0] = lerp(-48, truckX, ease.out(t)); truck.pos[1] = STREET_Y; placeOnBed(); spinWheels(truck, 0.2); }); })(),
+  ]);
+  crane.aim(Hrest);
+  await tw(1300, (t) => { crane.deploy(t); crane.aim(Hrest); });
+  const m1 = mk(LOOKS.bau, truckX + 3.0, STREET_Y, 13.8), m2 = mk(LOOKS.profi, truckX + 4.2, STREET_Y, 14.0);
+  faceDir(m1.root, -1, 0); faceDir(m2.root, -1, 0); setPose(m1, POSES.point);
+
+  // 2) Anschlagen und heben
+  let H = [...Hrest];
+  const go = async (to, ms, e = ease.inOut, cb = null) => {
+    const from = [...H];
+    await tw(ms, (t) => { H = [lerp(from[0], to[0], t), lerp(from[1], to[1], t), lerp(from[2], to[2], t)]; crane.aim(H); if (cb) cb(t); }, e);
+  };
+  const bp = bedPos();
+  await go([bp[0], bp[1] + 3.2, bp[2]], 2000);
+  await go([bp[0], bp[1] + 1.0, bp[2]], 900, ease.inOut, null);
+  setPose(m1, POSES.push); setPose(m2, POSES.push);
+  await wait(700);
+  // Zielposition: genau dort, wo die echte Treppe steht (Pivot px, pz)
+  const hookAbove = (h) => [H[0], H[1] - 1.0, H[2]];
+  const lift = (t, from, to) => {};
+  const startP = [...bp];
+  await go([startP[0], startP[1] + 6.5, startP[2] - 1], 1700, ease.inOut, () => { pf.at(H[0], H[1] - 1.0, H[2]); });
+  engine.flyTo({ az: 0.95, el: 0.3, r: 27, target: [7, 2.5, 8] }, S(1800));
+  const fromH = [...H];
+  const toH = [px, 7.2, pz];
+  await go(toH, 3200, ease.inOut, (t) => {
+    const k = ease.inOut(Math.max(0, (t - 0.25) / 0.6));
+    pf.at(H[0], H[1] - 1.0, H[2]); pf.rot[1] = lerp(Math.PI / 2, 0, ease.inOut(t));
+    pf.size(lerp(LAY[0], 1, k), lerp(LAY[1], 1, k), lerp(LAY[2], 1, k));
+  });
+  // 3) Absetzen: Stufen klappen auf, Geländer rastet ein
+  pfRail.visible = false;
+  m1.root.pos = [px - 2.5, 0, pz + 3.5]; m2.root.pos = [px + 1.5, 0, pz + 4.5]; faceDir(m1.root, 0, -1); faceDir(m2.root, 0, -1);
+  await go([px, 3.2, pz], 1800, ease.inOut, () => { pf.at(H[0], Math.max(0, H[1] - 3.2), H[2]); });
+  pf.at(px, 0, pz); pf.rot[1] = 0;
+  burst([px, 0.3, pz], 12, 0xd8dbde, 2.5, 600);
+  await tw(800, (t) => { pf.size(1, 1, 1); setPose(m1, POSES.point); });
+  await go([px + 1.5, 9, pz + 1], 1200);
+  engine.flyTo({ az: 0.85, el: 0.3, r: 20, target: [px + 1.5, 2.0, pz] }, S(1300));
+  // Monteure schrauben die Stufenfüße und das Podest fest
+  const bolts = [[0], [8], [16]];
+  for (const [i] of bolts) {
+    const s = steps[i];
+    await Promise.all([walkTo(m1, [s.pos[0] - 0.9, i === 0 ? 0 : s.pos[1], s.pos[2] + 0.9], { speed: 4 }).catch(() => {}), wait(400)]);
+    await tw(500, (t) => setPose(m1, { ...POSES.torch, nod: Math.sin(t * 20) * 0.1 }));
+    burst([s.pos[0], s.pos[1], s.pos[2]], 6, 0xffd166, 2.5, 400);
+  }
+  // Geländer rastet ein
+  pfRail.visible = true;
+  await tw(900, (t) => { const e = t < 0.7 ? ease.out(t / 0.7) * 1.15 : lerp(1.15, 1, (t - 0.7) / 0.3); pfRail.size(1, Math.max(e, 0.001), 1); });
+  pfRail.size(1, 1, 1);
+  burst([px, 4, pz], 22, 0xffe9a0, 4, 800, 0.1);
+  // Alles ersetzen durch die echte Treppe
+  house.setProgress({ ...house.state.p, aussentreppe: 100 });
+  outside.remove(pf);
+  // 4) Monteure laufen die Treppe hinauf
+  const wk = mk(LOOKS.bau, steps[0].pos[0], 0.4, steps[0].pos[2] + 0.5, fx);
+  m1.root.visible = false;
+  engine.flyTo({ az: 0.9, el: 0.28, r: 22, target: [px + 1.5, 2.0, pz] }, S(1200));
+  for (let i = 0; i < steps.length; i += 2) await walkTo(wk, [steps[i].pos[0], steps[i].pos[1] + 0.09, steps[i].pos[2]], { speed: 3.6 }).catch(() => {});
+  const top = rp.landing;
+  await walkTo(wk, [top.pos[0], top.pos[1] + 0.1, top.pos[2]], { speed: 3 }).catch(() => {});
+  burst([top.pos[0], top.pos[1] + 1.2, top.pos[2]], 26, 0xffd166, 4.5, 1000, 0.1);
+  await tw(1400, (t) => { setPose(wk, POSES.wave(t * 3)); setPose(m2, POSES.thumbs); });
+  fx.remove(wk.root);
+  // 5) Kran und Sattelzug fahren ab
+  engine.flyTo({ az: 0.35, el: 0.3, r: 38, target: [3, 3, 9] }, S(1400));
+  await tw(1000, (t) => { crane.deploy(1 - t); crane.aim(Hrest); });
+  fx.remove(crane.rig);
+  await Promise.all([driveTo(crane, [48, STREET_Y, zRow], 3000, ease.in), driveTo(truck, [-48, STREET_Y, zRow], 3000, ease.in)]);
+}
+
+export const ANIMS = { oeltank, entkernung, aufstockung, dach, elektro, sanitaer, fenster, solar, daemmung, fassade, estrich, trockenbau, maler, boeden, kueche, aussentreppe };
 
 // Fallback für Phasen ohne eigene Animation: zwei Bauarbeiter jubeln vor dem Haus, Konfetti.
 async function generic(ctx) {
