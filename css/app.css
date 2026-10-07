@@ -311,3 +311,9 @@ dialog.drawer::backdrop { background: rgba(10,12,16,.45); }
 .dot::after { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--line); transition: width .15s, background .15s; }
 .dot.on::after { width: 20px; background: var(--accent); }
 .seg .pill { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+
+/* Planung: Drag & Drop */
+.grip { align-self: stretch; display: grid; place-items: center; width: 40px; margin: -4px -6px -4px 0; border: 0; background: transparent; color: var(--muted); touch-action: none; cursor: grab; border-radius: 10px; }
+.phase.dragging { position: relative; z-index: 5; box-shadow: 0 12px 32px rgba(0,0,0,.22); transition: none; scale: 1.02; }
+.phase.dragging .grip { cursor: grabbing; color: var(--accent); }
+.phase.dragging, .phase.dragging * { user-select: none; -webkit-user-select: none; }

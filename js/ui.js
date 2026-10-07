@@ -626,19 +626,53 @@ function viewTodos() {
 // ---------- Ansicht: Planung ----------
 const isDefaultPhase = (id) => DEFAULT_PHASES.some((p) => p.id === id);
 
-async function movePhase(p, dir) {
-  const list = phases();
-  const i = list.findIndex((x) => x.id === p.id);
-  const j = i + dir;
-  if (j < 0 || j >= list.length) return;
-  // Reihenfolge neu durchnummerieren, damit nie zwei Phasen denselben Wert haben
-  const order = list.map((x) => x.id);
-  [order[i], order[j]] = [order[j], order[i]];
-  for (const [k, id] of order.entries()) {
+// Reihenfolge neu durchnummerieren, damit nie zwei Phasen denselben Wert haben
+async function reorderPhases(ids) {
+  for (const [k, id] of ids.entries()) {
     const ph = Store.get('phases', id);
     const newOrder = (k + 1) * 10;
-    if (ph.order !== newOrder) await Store.save('phases', { ...ph, order: newOrder });
+    if (ph && ph.order !== newOrder) await Store.save('phases', { ...ph, order: newOrder });
   }
+}
+
+// Drag & Drop per Griff (Maus und Touch): die Karte folgt dem Finger, die anderen rücken live nach.
+function dragStart(e, card, container) {
+  if (e.button != null && e.button !== 0) return;
+  e.preventDefault();
+  const handle = e.currentTarget;
+  handle.setPointerCapture(e.pointerId);
+  const items = () => [...container.querySelectorAll('.phase[data-id]')];
+  const startIds = items().map((x) => x.dataset.id).join();
+  let lastY = e.clientY, offset = 0, raf = 0;
+  card.classList.add('dragging');
+  const place = () => {
+    // Karte tauscht mit Nachbarn, sobald ihre Mitte deren Mitte passiert
+    let moved = true;
+    while (moved) {
+      moved = false;
+      const list = items(), i = list.indexOf(card), r = card.getBoundingClientRect(), mid = r.top + r.height / 2;
+      const prev = list[i - 1], next = list[i + 1];
+      if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { const before = r.top; container.insertBefore(card, prev); offset -= card.getBoundingClientRect().top - before; moved = true; continue; } }
+      if (next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) { const before = r.top; container.insertBefore(card, next.nextSibling); offset -= card.getBoundingClientRect().top - before; moved = true; } }
+    }
+    card.style.transform = `translateY(${offset}px)`;
+  };
+  const move = (ev) => {
+    offset += ev.clientY - lastY; lastY = ev.clientY;
+    place();
+    cancelAnimationFrame(raf);
+    const edge = 70, y = ev.clientY, step = y < edge + 60 ? -12 : y > innerHeight - edge ? 12 : 0;
+    if (step) { const tick = () => { window.scrollBy(0, step); offset += step; place(); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); }
+  };
+  const end = async () => {
+    cancelAnimationFrame(raf);
+    handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end);
+    card.classList.remove('dragging'); card.style.transform = '';
+    const ids = items().map((x) => x.dataset.id);
+    if (ids.join() !== startIds) { await reorderPhases(ids); }
+    else render();
+  };
+  handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
 }
 
 function phaseForm(entry) {
@@ -674,19 +708,17 @@ function viewPlan() {
   return h(
     'div',
     { class: 'view' },
-    h('section', { class: 'card' }, h('div', { class: 'split' }, h('h3', {}, 'Gesamtfortschritt'), h('strong', {}, pct + ' %')), bar(pct), h('p', { class: 'muted small' }, 'Die Reihenfolge lässt sich mit den Pfeilen ändern. Das Haus zeigt später jede fertige Phase, egal an welcher Stelle sie steht.')),
-    list.map((p, i) =>
+    h('section', { class: 'card' }, h('div', { class: 'split' }, h('h3', {}, 'Gesamtfortschritt'), h('strong', {}, pct + ' %')), bar(pct), h('p', { class: 'muted small' }, 'Die Reihenfolge änderst du, indem du eine Phase am Griff nach oben oder unten ziehst. Das Haus zeigt später jede fertige Phase, egal an welcher Stelle sie steht.')),
+    list.map((p) =>
       h(
         'article',
-        { class: 'card phase ps-' + p.state },
+        { class: 'card phase ps-' + p.state, 'data-id': p.id },
         h('div', { class: 'phase-main', onclick: () => phaseForm(p) },
           h('div', { class: 'split' }, h('h3', { class: 'ph-title' }, phaseIcon(p, { size: 20 }), ' ', p.name), chip(PHASE_STATES.find((s) => s[0] === p.state)?.[1] || p.state, 'phs-' + p.state)),
           bar(p.progress),
           h('div', { class: 'muted small' }, [p.progress + ' %', p.start && 'ab ' + fmtDate(p.start), p.end && 'bis ' + fmtDate(p.end)].filter(Boolean).join(' · '))
         ),
-        h('div', { class: 'movers' },
-          h('button', { class: 'mv', disabled: i === 0, 'aria-label': 'Nach oben', onclick: () => movePhase(p, -1) }, icon('arrow_upward', { size: 18 })),
-          h('button', { class: 'mv', disabled: i === list.length - 1, 'aria-label': 'Nach unten', onclick: () => movePhase(p, 1) }, icon('arrow_downward', { size: 18 })))
+        h('button', { class: 'grip', 'aria-label': `${p.name} verschieben (ziehen)`, onpointerdown: (ev) => dragStart(ev, ev.currentTarget.closest('.phase'), ev.currentTarget.closest('.view')) }, icon('drag_indicator', { size: 24 }))
       )
     ),
     h('button', { class: 'btn block', onclick: () => phaseForm() }, '+ Eigene Phase hinzufügen')
