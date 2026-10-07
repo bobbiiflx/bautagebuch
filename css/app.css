@@ -314,10 +314,12 @@ dialog.drawer::backdrop { background: rgba(10,12,16,.45); }
 
 /* Planung: Drag & Drop */
 .grip { align-self: stretch; display: grid; place-items: center; width: 40px; margin: -4px -6px -4px 0; border: 0; background: transparent; color: var(--muted); touch-action: none; cursor: grab; border-radius: 10px; }
-.phase.dragging { position: relative; z-index: 5; box-shadow: 0 12px 32px rgba(0,0,0,.22); transition: none; scale: 1.02; }
+.phase.dragging { position: relative; z-index: 5; box-shadow: 0 12px 32px rgba(0,0,0,.22); transition: none; }
 .phase.dragging .grip { cursor: grabbing; color: var(--accent); }
 .phase.dragging, .phase.dragging * { user-select: none; -webkit-user-select: none; }
 
 .ph-todos { flex: 0 0 100%; border-top: 1px solid var(--line); padding-top: 4px; margin-top: 2px; }
 .ph-todo-list { padding-left: 4px; }
 .btn-text.small { font-size: .88rem; }
+body.is-dragging { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: grabbing; }
+.grip { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }

@@ -650,43 +650,64 @@ async function reorderPhases(ids) {
 }
 
 // Drag & Drop per Griff (Maus und Touch): die Karte folgt dem Finger, die anderen rücken live nach.
+// Die Listener hängen am window (nicht am Griff), weil das Umhängen der Karte im DOM sonst die Zeiger-Erfassung beendet.
+let dragging = false;
 function dragStart(e, card, container) {
-  if (e.button != null && e.button !== 0) return;
+  if (dragging || (e.pointerType === 'mouse' && e.button !== 0)) return;
   e.preventDefault();
-  const handle = e.currentTarget;
-  handle.setPointerCapture(e.pointerId);
+  dragging = true;
+  const pid = e.pointerId;
   const items = () => [...container.querySelectorAll('.phase[data-id]')];
   const startIds = items().map((x) => x.dataset.id).join();
-  let lastY = e.clientY, offset = 0, raf = 0;
+  let lastY = e.clientY, offset = 0, raf = 0, scrollStep = 0, finished = false;
+  try { e.currentTarget.setPointerCapture(pid); } catch { /* optional */ }
   card.classList.add('dragging');
+  document.body.classList.add('is-dragging');
   const place = () => {
     // Karte tauscht mit Nachbarn, sobald ihre Mitte deren Mitte passiert
-    let moved = true;
-    while (moved) {
-      moved = false;
-      const list = items(), i = list.indexOf(card), r = card.getBoundingClientRect(), mid = r.top + r.height / 2;
+    for (let guard = 0; guard < 30; guard++) {
+      const list = items(), i = list.indexOf(card);
+      const r = card.getBoundingClientRect(), mid = r.top + r.height / 2;
       const prev = list[i - 1], next = list[i + 1];
-      if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { const before = r.top; container.insertBefore(card, prev); offset -= card.getBoundingClientRect().top - before; moved = true; continue; } }
-      if (next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) { const before = r.top; container.insertBefore(card, next.nextSibling); offset -= card.getBoundingClientRect().top - before; moved = true; } }
+      let target = null, ref = null;
+      if (prev) { const pr = prev.getBoundingClientRect(); if (mid < pr.top + pr.height / 2) { target = prev; ref = prev; } }
+      if (!target && next) { const nr = next.getBoundingClientRect(); if (mid > nr.top + nr.height / 2) { target = next; ref = next.nextSibling; } }
+      if (!target) break;
+      const before = r.top;
+      container.insertBefore(card, ref);
+      offset -= card.getBoundingClientRect().top - before;
+      card.style.transform = `translateY(${offset}px)`;
     }
     card.style.transform = `translateY(${offset}px)`;
   };
+  const loop = () => {
+    if (finished) return;
+    if (scrollStep) { const y0 = window.scrollY; window.scrollBy(0, scrollStep); offset += window.scrollY - y0; place(); }
+    raf = requestAnimationFrame(loop);
+  };
   const move = (ev) => {
+    if (ev.pointerId !== pid) return;
+    ev.preventDefault();
     offset += ev.clientY - lastY; lastY = ev.clientY;
     place();
-    cancelAnimationFrame(raf);
-    const edge = 70, y = ev.clientY, step = y < edge + 60 ? -12 : y > innerHeight - edge ? 12 : 0;
-    if (step) { const tick = () => { window.scrollBy(0, step); offset += step; place(); raf = requestAnimationFrame(tick); }; raf = requestAnimationFrame(tick); }
+    const edge = 90;
+    scrollStep = ev.clientY < edge ? -10 : ev.clientY > innerHeight - edge ? 10 : 0;
   };
-  const end = async () => {
+  const end = async (ev) => {
+    if (finished || (ev && ev.pointerId != null && ev.pointerId !== pid)) return;
+    finished = true;
     cancelAnimationFrame(raf);
-    handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end);
+    for (const [t, f] of listeners) window.removeEventListener(t, f, true);
+    document.body.classList.remove('is-dragging');
     card.classList.remove('dragging'); card.style.transform = '';
+    dragging = false;
     const ids = items().map((x) => x.dataset.id);
-    if (ids.join() !== startIds) { await reorderPhases(ids); }
-    else render();
+    if (ids.join() !== startIds) await reorderPhases(ids);
+    render();
   };
-  handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+  const listeners = [['pointermove', move], ['pointerup', end], ['pointercancel', end], ['blur', () => end()], ['contextmenu', (ev) => ev.preventDefault()]];
+  for (const [t, f] of listeners) window.addEventListener(t, f, { capture: true, passive: false });
+  raf = requestAnimationFrame(loop);
 }
 
 function phaseForm(entry) {
@@ -964,6 +985,7 @@ function openMenu() {
 
 export function render() {
   if (!root) return;
+  if (dragging) return; // wird am Ende des Ziehens neu gezeichnet
   if (document.querySelector('dialog[open]')) { renderAfterClose = true; return; }
   const r = route();
   // In den Einstellungen nicht neu zeichnen, während gerade getippt wird (z. B. der Freigabe-Link).
