@@ -8,6 +8,7 @@ import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import * as Wx from './weather.js';
+import { openInk, inkThumb } from './ink.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import * as Fin from './finance.js';
 import { DEFAULT_PHASES, PHASE_STATES, DOC_CATEGORIES, COST_STATES, DEFECT_STATES, ROOMS, BUILTIN_TRADES, BUDGET_SUGGESTIONS } from './phases.js';
@@ -242,6 +243,34 @@ function photoField(initial = []) {
   };
 }
 
+// Handschrift-Notizen am Eintrag (Formular): neu anlegen, bearbeiten, entfernen; Dateien erst beim Speichern endgültig löschen
+function sketchField(initial = [], getPhotos = () => []) {
+  const refs = [...initial];
+  const made = []; // in dieser Sitzung neu entstanden
+  const obsolete = []; // alte Versionen / entfernte Notizen
+  const grid = h('div', { class: 'thumbs' });
+  const drop = (r) => (made.includes(r) ? (made.splice(made.indexOf(r), 1), Store.dropSketches([r])) : obsolete.push(r));
+  const redraw = () => grid.replaceChildren(...refs.map((r) => inkThumb(r, {
+    onClick: async () => { const n = await openInk({ ref: r, photoIds: getPhotos() }); if (n && n.v !== r.v) { refs[refs.indexOf(r)] = n; made.push(n); drop(r); } redraw(); },
+    onRemove: () => { refs.splice(refs.indexOf(r), 1); drop(r); redraw(); },
+  })));
+  const el = h('div', { class: 'photofield' }, h('span', { class: 'lbl' }, 'Handschrift'), grid,
+    h('div', { class: 'row' }, h('button', { type: 'button', class: 'btn', onclick: async () => { const n = await openInk({ photoIds: getPhotos() }); if (n) { refs.push(n); made.push(n); redraw(); } } }, icon('draw', { size: 20 }), ' Handschrift-Notiz')));
+  redraw();
+  return { el, refs, commit: () => Store.dropSketches(obsolete), cancel: () => Store.dropSketches(made) };
+}
+// Notiz direkt am gespeicherten Eintrag ändern (Detailansicht)
+async function sketchEdit(d, ref) {
+  const n = await openInk({ ref, photoIds: d.photos || [] });
+  if (!n || (ref && n.v === ref.v)) return;
+  const cur = Store.get('diary', d.id) || d;
+  const list = ref ? (cur.sketches || []).map((r) => (r.id === ref.id ? n : r)) : [...(cur.sketches || []), n];
+  await Store.save('diary', { ...cur, sketches: list });
+  if (ref) await Store.dropSketches([ref]);
+  const fresh = Store.get('diary', d.id);
+  if (!wideQ.matches) { document.querySelector('dialog[open]')?.close(); openDiaryDetail(fresh); }
+}
+
 const photoStrip = (ids = []) => ids.length ? h('div', { class: 'thumbs small' }, ids.map((id) => thumb(id))) : null;
 
 // ---------- Ansicht: Übersicht ----------
@@ -328,6 +357,7 @@ function diaryForm(entry) {
   const phase = phaseSelect(e.phaseId);
   const who = h('input', { type: 'text', placeholder: 'Firma / Handwerker', value: e.who || '' });
   const pf = photoField(e.photos);
+  const sk = sketchField(e.sketches || [], () => pf.ids);
   // Wetter automatisch zum Datum (Ort aus den Einstellungen), bleibt am Eintrag gespeichert
   let wx = e.weather || null;
   const loc = Store.get('settings', 'location');
@@ -346,12 +376,13 @@ function diaryForm(entry) {
   paintWx();
   date.addEventListener('change', () => loadWx(false));
   if (!entry || !e.weather) loadWx(false);
-  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Wetter', wxBox), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Wer war da?', who), pf.el], {
+  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Wetter', wxBox), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Wer war da?', who), pf.el, sk.el], {
     onSave: async () => {
-      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), weather: wx, photos: pf.ids });
+      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), weather: wx, photos: pf.ids, sketches: sk.refs });
       await pf.commit();
+      await sk.commit();
     },
-    onCancel: () => pf.cancel(),
+    onCancel: () => { pf.cancel(); sk.cancel(); },
     onDelete: entry && (() => Store.remove('diary', e.id)),
   });
 }
@@ -402,6 +433,9 @@ function diaryDetail(d, onEdit) {
       row('Dabei', who.length ? h('span', { class: 'avs' }, who.map(avatar), h('span', { class: 'muted small' }, who.join(', '))) : h('span', { class: 'muted' }, '–')),
       row('Wetter', d.weather ? h('span', { class: 'wx-s' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 20 }), ' ' + Wx.summary(d.weather)) : h('span', { class: 'muted' }, '–'))),
     d.text && h('section', { class: 'card' }, h('h3', {}, 'Notizen'), h('p', { class: 'dtext' }, d.text)),
+    h('section', { class: 'card' },
+      h('div', { class: 'split' }, h('h3', {}, 'Handschrift'), h('button', { type: 'button', class: 'btn-text small', onclick: () => sketchEdit(d, null) }, icon('draw', { size: 18 }), ' Neu')),
+      d.sketches?.length ? h('div', { class: 'ink-list' }, d.sketches.map((r) => inkThumb(r, { big: true, onClick: () => sketchEdit(d, r) }))) : h('p', { class: 'muted small' }, 'Mit dem Apple Pencil Skizzen, Maße oder Notizen festhalten – auch direkt auf einem Foto.')),
     d.photos?.length ? h('section', { class: 'card' }, h('h3', {}, `Fotos (${d.photos.length})`), h('div', { class: 'thumbs' }, d.photos.map((id) => thumb(id)))) : null,
     h('section', { class: 'card' },
       h('div', { class: 'split' }, h('h3', {}, 'Aufgaben im Gewerk'), d.phaseId && h('button', { type: 'button', class: 'btn-text small', onclick: () => todoForm(null, d.phaseId) }, icon('add', { size: 18 }), ' Neu')),
@@ -473,7 +507,7 @@ function viewDiary() {
       h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), who.slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), who.length > 2 && h('span', { class: 'tchip plain' }, `+${who.length - 2}`)),
       h('div', { class: 'dc-foot' },
         ph ? h('div', { class: 'dc-prog' }, h('div', { class: 'bar' }, h('div', { class: 'bar-fill', style: { width: ph.progress + '%', background: 'var(--pc)' } })), h('span', { class: 'muted small' }, ph.progress + '%')) : h('span'),
-        d.photos?.length ? h('span', { class: 'phs' }, icon('image', { size: 18 }), String(d.photos.length)) : null));
+        h('span', { class: 'dc-ic' }, d.sketches?.length ? h('span', { class: 'phs' }, icon('draw', { size: 18 }), String(d.sketches.length)) : null, d.photos?.length ? h('span', { class: 'phs' }, icon('image', { size: 18 }), String(d.photos.length)) : null)));
   };
 
   let body;
@@ -905,10 +939,25 @@ async function saveTodo(t, oldPhaseId) {
   await syncPhase(t.phaseId);
   if (oldPhaseId && oldPhaseId !== t.phaseId) await syncPhase(oldPhaseId);
 }
-const toggleTodo = (t, done) => saveTodo({ ...t, done }, t.phaseId);
+// Abhängigkeiten: t.after = IDs von Aufgaben, die vorher erledigt sein müssen
+const preds = (t) => (t.after || []).map((id) => Store.get('todos', id)).filter(Boolean);
+const openPreds = (t) => preds(t).filter((p) => !p.done);
+const blockedBy = (t) => (t.done ? [] : openPreds(t));
+const successors = (t) => Store.all('todos').filter((x) => (x.after || []).includes(t.id));
+// hängt a (auch über Zwischenschritte) von b ab?
+function dependsOn(a, b, seen = new Set()) {
+  if (!a || seen.has(a.id)) return false;
+  seen.add(a.id);
+  return (a.after || []).some((id) => id === b.id || dependsOn(Store.get('todos', id), b, seen));
+}
+async function toggleTodo(t, done) {
+  const wait = done ? openPreds(t) : [];
+  if (wait.length && !confirm(`Noch offen: ${wait.map((p) => p.title).join(', ')}.\n\nTrotzdem als erledigt markieren?`)) { render(); return; }
+  await saveTodo({ ...t, done }, t.phaseId);
+}
 
 function todoForm(entry, presetPhase = '') {
-  const e = entry || { title: '', due: '', assignee: '', phaseId: presetPhase, note: '', done: false };
+  const e = entry || { title: '', due: '', assignee: '', phaseId: presetPhase, note: '', done: false, after: [] };
   const title = h('input', { type: 'text', required: true, value: e.title });
   const due = h('input', { type: 'date', value: e.due || '' });
   const names = [...new Set([Store.getUserName(), ...Store.all('todos').map((t) => t.assignee), ...Store.all('diary').map((t) => t.updatedBy)].filter((n) => n && n !== 'Unbekannt'))];
@@ -916,19 +965,46 @@ function todoForm(entry, presetPhase = '') {
   const dl = h('datalist', { id: 'names' }, names.map((n) => h('option', { value: n })));
   const phase = phaseSelect(e.phaseId, '– keine Zuordnung –');
   const note = h('textarea', { rows: 3, value: e.note || '' });
-  sheet(entry ? 'Aufgabe bearbeiten' : 'Neue Aufgabe', [field('Aufgabe', title), field('Fällig am', due), field('Zuständig', assignee), dl, field('Planungsschritt', phase, 'Erledigte Aufgaben erhöhen den Fortschritt dieses Schritts.'), field('Notiz', note)], {
-    onSave: () => saveTodo({ ...e, title: title.value.trim(), due: due.value, assignee: assignee.value.trim(), phaseId: phase.value, note: note.value.trim() }, e.phaseId),
-    onDelete: entry && (async () => { await Store.remove('todos', e.id); await syncPhase(e.phaseId); }),
+  // mögliche Vorgänger: alle anderen Aufgaben, außer solchen, die selbst von dieser abhängen (Kreise vermeiden)
+  const cand = Store.all('todos').filter((x) => x.id !== e.id && !(e.id && dependsOn(x, e))).sort((a, b) => Number(a.done) - Number(b.done) || a.title.localeCompare(b.title));
+  const picked = new Set(e.after || []);
+  const boxes = cand.map((x) => h('label', { class: 'depopt' + (x.done ? ' done' : '') }, h('input', { type: 'checkbox', checked: picked.has(x.id), onchange: (ev) => (ev.target.checked ? picked.add(x.id) : picked.delete(x.id)) }), h('span', {}, x.title, h('small', { class: 'muted' }, ' · ' + (x.done ? 'erledigt' : phaseName(x.phaseId) || 'offen')))));
+  const dep = cand.length ? h('div', { class: 'deplist' }, boxes) : h('div', { class: 'muted small' }, 'Noch keine anderen Aufgaben.');
+  const succ = entry ? successors(entry) : [];
+  sheet(entry ? 'Aufgabe bearbeiten' : 'Neue Aufgabe', [field('Aufgabe', title), field('Fällig am', due), field('Zuständig', assignee), dl, field('Planungsschritt', phase, 'Erledigte Aufgaben erhöhen den Fortschritt dieses Schritts.'), field('Wartet auf', dep, 'Diese Aufgaben müssen zuerst erledigt sein.'), succ.length ? h('div', { class: 'muted small' }, icon('link', { size: 16 }), ' Blockiert: ' + succ.map((x) => x.title).join(', ')) : null, field('Notiz', note)], {
+    onSave: () => saveTodo({ ...e, title: title.value.trim(), due: due.value, assignee: assignee.value.trim(), phaseId: phase.value, note: note.value.trim(), after: [...picked] }, e.phaseId),
+    onDelete: entry && (async () => {
+      for (const x of succ) await Store.save('todos', { ...x, after: (x.after || []).filter((id) => id !== e.id) });
+      await Store.remove('todos', e.id);
+      await syncPhase(e.phaseId);
+    }),
   });
 }
 
 // Eine Aufgabenzeile (Aufgaben- und Planungsansicht)
 function todoRow(t, withPhase = true) {
+  const wait = blockedBy(t);
+  const nSucc = t.done ? 0 : successors(t).filter((x) => !x.done).length;
+  const late = !t.done && t.due && preds(t).some((p) => !p.done && p.due && p.due > t.due);
   return h(
     'div',
-    { class: 'todo' + (t.done ? ' done' : '') },
+    { class: 'todo' + (t.done ? ' done' : '') + (wait.length ? ' blocked' : '') },
     h('input', { type: 'checkbox', checked: t.done, 'aria-label': 'Erledigt', onchange: (e) => toggleTodo(t, e.target.checked) }),
-    h('div', { class: 'todo-t', onclick: () => todoForm(t) }, h('div', {}, t.title), h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? 'überfällig · ' : '') + fmtDate(t.due), t.assignee, withPhase && phaseName(t.phaseId)].filter(Boolean).join(' · ')))
+    h(
+      'div',
+      { class: 'todo-t', onclick: () => todoForm(t) },
+      h('div', {}, t.title),
+      h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? 'überfällig · ' : '') + fmtDate(t.due), t.assignee, withPhase && phaseName(t.phaseId)].filter(Boolean).join(' · ')),
+      wait.length || nSucc || late
+        ? h(
+            'div',
+            { class: 'deps' },
+            wait.length ? h('span', { class: 'dep wait' }, icon('lock', { size: 14 }), 'Wartet auf ' + wait.map((p) => p.title).join(', ')) : null,
+            nSucc ? h('span', { class: 'dep out' }, icon('link', { size: 14 }), `Blockiert ${nSucc}`) : null,
+            late ? h('span', { class: 'dep warn' }, icon('warning', { size: 14 }), 'Fällig vor Vorgänger') : null
+          )
+        : null
+    )
   );
 }
 
@@ -940,7 +1016,8 @@ function viewTodos() {
   return h(
     'div',
     { class: 'view' },
-    open.length ? h('div', { class: 'card' }, open.map((t) => todoRow(t))) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.'),
+    open.length ? h('div', { class: 'card' }, open.filter((t) => !blockedBy(t).length).map((t) => todoRow(t))) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.'),
+    open.some((t) => blockedBy(t).length) ? h('div', { class: 'card' }, h('div', { class: 'sub' }, icon('lock', { size: 16 }), ' Wartet auf Vorgänger'), open.filter((t) => blockedBy(t).length).map((t) => todoRow(t))) : null,
     done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, icon(showDone ? 'expand_less' : 'expand_more', { size: 20 }), ` Erledigt (${done.length})`) : null,
     showDone && done.length ? h('div', { class: 'card' }, done.map((t) => todoRow(t))) : null,
     fab(() => todoForm())

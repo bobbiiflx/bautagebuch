@@ -133,6 +133,7 @@ export async function remove(type, id) {
   await idbPut('records', rec);
   // zugehörige Dateien (Fotos, Dokument) mitlöschen
   for (const p of prev.data.photos || []) await deleteBlobPair(photoPaths(p).full, photoPaths(p).thumb);
+  for (const r of prev.data.sketches || []) await deleteBlobPair(sketchPaths(r).json, sketchPaths(r).png);
   if (type === 'documents' && prev.data.path) await deleteBlob(prev.data.path);
   setState({});
   schedulePush();
@@ -140,6 +141,28 @@ export async function remove(type, id) {
 
 // ---------- Dateien (Fotos, Dokumente) ----------
 export const photoPaths = (id) => ({ full: `fotos/${id}.jpg`, thumb: `fotos/thumbs/${id}.jpg` });
+
+// ---------- Handschrift-Notizen: Striche als JSON + Vorschaubild; jede Speicherung bekommt eine neue Version (v),
+// damit das zweite Gerät nie eine veraltete Datei aus seinem Zwischenspeicher zeigt.
+export const sketchPaths = (r) => ({ json: `skizzen/${r.id}_${r.v}.json`, png: `skizzen/${r.id}_${r.v}.png` });
+export async function putSketch(id, data, png) {
+  const r = { id: id || uid(), v: Date.now().toString(36) };
+  const p = sketchPaths(r);
+  await putBlobLocal(p.json, new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  await putBlobLocal(p.png, png);
+  setState({});
+  schedulePush();
+  return r;
+}
+export async function getSketch(r) {
+  const url = await blobURL(sketchPaths(r).json);
+  if (!url) return null;
+  return (await fetch(url)).json();
+}
+export async function dropSketches(refs) {
+  for (const r of refs) await deleteBlobPair(sketchPaths(r).json, sketchPaths(r).png);
+  setState({});
+}
 
 async function putBlobLocal(path, blob) {
   await idbPut('blobs', blob, path);
