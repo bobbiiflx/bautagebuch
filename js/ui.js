@@ -1325,17 +1325,23 @@ const docF = { cat: new Set(), phase: new Set(), tag: new Set(), pin: false };
 const CAT_ICONS = { 'Verträge': 'edit_note', 'Pläne': 'straighten', 'Rechnungen': 'receipt_long', 'Angebote': 'request_quote', 'Genehmigungen': 'task_alt', 'Fotos': 'photo_camera', 'Sonstiges': 'attach_file' };
 const docMatches = (d, f) => (!f.cat.size || f.cat.has(docCat(d))) && (!f.phase.size || f.phase.has(d.phaseId)) && (!f.tag.size || (d.tags || []).some((t) => f.tag.has(t))) && (!f.pin || d.pinned);
 
-// Auswahlfeld als Pille: Tipp öffnet eine Liste mit Häkchen (Mehrfachauswahl) und Icons
-function multiPill(ic, title, any, options /* [{v, t, icon}] */, chosen, onChange) {
-  const names = options.filter((o) => chosen.has(o.v)).map((o) => o.t);
-  const text = !names.length ? any : names.length === 1 ? names[0] : `${names[0]} +${names.length - 1}`;
-  return h('button', { type: 'button', class: 'pillsel multi' + (names.length ? ' on' : ''), 'aria-label': title, onclick: () => {
-    const rows = options.map((o) => h('label', { class: 'mrow' },
-      h('input', { type: 'checkbox', checked: chosen.has(o.v), onchange: (e) => { e.target.checked ? chosen.add(o.v) : chosen.delete(o.v); onChange(); } }),
-      o.icon, h('span', { class: 'mt' }, o.t)));
-    const dlg = sheet(title, [rows.length ? h('div', { class: 'mlist' }, rows) : h('p', { class: 'muted small' }, 'Noch nichts vorhanden.'),
-      h('button', { type: 'button', class: 'btn block', onclick: () => { chosen.clear(); rows.forEach((r) => (r.querySelector('input').checked = false)); onChange(); } }, 'Auswahl aufheben')], { noSave: true });
-  } }, icon(ic, { size: 18 }), h('span', {}, text), icon('expand_more', { size: 18 }));
+// Filtermaske: Kategorien, Gewerke und Tags in einem Blatt (Mehrfachauswahl, mit Icons). Erst „Anwenden“ übernimmt die Auswahl.
+function docFilterSheet(opts) {
+  const tmp = { cat: new Set(docF.cat), phase: new Set(docF.phase), tag: new Set(docF.tag) };
+  const section = (title, key, items) => h('section', { class: 'fsec' },
+    h('h3', {}, title, h('span', { class: 'muted small' }, ' ' + (items.length ? '' : '– nichts vorhanden'))),
+    h('div', { class: 'mlist' }, items.map((o) => h('label', { class: 'mrow' },
+      h('input', { type: 'checkbox', checked: tmp[key].has(o.v), onchange: (e) => { e.target.checked ? tmp[key].add(o.v) : tmp[key].delete(o.v); } }),
+      o.icon, h('span', { class: 'mt' }, o.t)))));
+  sheet('Filter', [
+    section('Kategorie', 'cat', opts.cats),
+    section('Gewerk', 'phase', opts.phases),
+    section('Tags', 'tag', opts.tags),
+    h('button', { type: 'button', class: 'btn block', onclick: (e) => { Object.values(tmp).forEach((x) => x.clear()); e.currentTarget.closest('form').querySelectorAll('input[type=checkbox]').forEach((c) => (c.checked = false)); } }, 'Alle Filter aufheben'),
+  ], {
+    saveLabel: 'Anwenden',
+    onSave: () => { docF.cat = tmp.cat; docF.phase = tmp.phase; docF.tag = tmp.tag; render(); },
+  });
 }
 
 function viewDocs() {
@@ -1343,7 +1349,8 @@ function viewDocs() {
   const list = all.filter((d) => docMatches(d, docF));
   const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
   const set = (patch) => { Object.assign(docF, patch); render(); };
-  const active = docF.cat.size || docF.phase.size || docF.tag.size || docF.pin;
+  const count = docF.cat.size + docF.phase.size + docF.tag.size;
+  const active = count || docF.pin;
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
   const tagIds = allDocTags().filter((t) => all.some((d) => (d.tags || []).includes(t)));
   const row = (d) => {
@@ -1361,9 +1368,11 @@ function viewDocs() {
     'div',
     { class: 'view' },
     h('div', { class: 'pills dfilters' },
-      multiPill('folder', 'Kategorien', 'Alle Kategorien', DOC_CATEGORIES.map((c) => ({ v: c, t: c, icon: icon(CAT_ICONS[c] || 'folder', { size: 22 }) })), docF.cat, () => render()),
-      multiPill('layers', 'Gewerke', 'Alle Gewerke', phaseIds.map((id) => ({ v: id, t: phaseName(id), icon: phaseIcon({ id }, { size: 22 }) })), docF.phase, () => render()),
-      multiPill('sell', 'Tags', 'Alle Tags', tagIds.map((t) => ({ v: t, t: '#' + t, icon: icon('sell', { size: 22 }) })), docF.tag, () => render()),
+      h('button', { type: 'button', class: 'pill small fpill' + (count ? ' on' : ''), onclick: () => docFilterSheet({
+        cats: DOC_CATEGORIES.map((c) => ({ v: c, t: c, icon: icon(CAT_ICONS[c] || 'folder', { size: 22 }) })),
+        phases: phaseIds.map((id) => ({ v: id, t: phaseName(id), icon: phaseIcon({ id }, { size: 22 }) })),
+        tags: tagIds.map((t) => ({ v: t, t: '#' + t, icon: icon('sell', { size: 22 }) })),
+      }) }, icon('tune', { size: 18 }), ' Filter', count ? h('span', { class: 'fcount' }, String(count)) : null),
       h('button', { class: 'pill small' + (docF.pin ? ' on' : ''), 'aria-pressed': String(docF.pin), onclick: () => set({ pin: !docF.pin }) }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt'),
       active ? h('button', { class: 'btn-text small', onclick: () => { docF.cat.clear(); docF.phase.clear(); docF.tag.clear(); docF.pin = false; render(); } }, 'Zurücksetzen') : null),
     list.length

@@ -524,3 +524,9 @@ dialog.docview[open] { display: flex; flex-direction: column; }
 .mrow:first-child { border-top: 0; }
 .mrow .mt { flex: 1; }
 .mrow input[type=checkbox] { width: 22px; height: 22px; min-height: 0; flex: none; accent-color: var(--accent); }
+
+.fpill { display: inline-flex; align-items: center; gap: 4px; }
+.fcount { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 4px; border-radius: 99px; background: var(--bg); color: var(--ink); font-size: .72rem; font-weight: 700; }
+.pill.on .fcount { background: var(--bg); color: var(--ink); }
+.fsec h3 { margin: 14px 0 2px; font-size: .95rem; }
+.fsec:first-child h3 { margin-top: 0; }
