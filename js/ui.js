@@ -145,6 +145,12 @@ export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, 
   dlg.append(form);
   document.body.append(dlg);
   dlg.showModal();
+  // Fokus: erstes Eingabefeld (nur wenn es unter den ersten Feldern steht), sonst neutral – nie auf „Abbrechen“
+  const bodyEl = dlg.querySelector('.sheet-body');
+  const fields = [...bodyEl.querySelectorAll('.field')].slice(0, 3);
+  const first = fields.map((f) => f.querySelector('input, textarea, select')).find((el) => el && !el.disabled && !el.readOnly && (el.tagName === 'TEXTAREA' || ['text', 'search', 'tel', 'email', 'url', 'number'].includes(el.type || 'text')));
+  if (first) first.focus({ preventScroll: true });
+  else { bodyEl.tabIndex = -1; bodyEl.focus({ preventScroll: true }); }
   return dlg;
 }
 
