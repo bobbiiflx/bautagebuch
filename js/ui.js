@@ -318,7 +318,7 @@ function costSums(costs = Store.all('costs')) {
   const subs = real.filter((c) => c.subsidy);
   const subPaid = sum(subs.filter((c) => c.subsidyPaid), (c) => c.subsidyAmount);
   const subOpen = sum(subs.filter((c) => !c.subsidyPaid), (c) => c.subsidyAmount);
-  return { spent, subPaid, subOpen, net: spent - subPaid, open: sum(costs.filter((c) => c.status === 'offen'), (c) => c.amount), offers: sum(costs.filter((c) => c.status === 'angebot'), (c) => c.amount) };
+  return { spent, subPaid, subOpen, net: spent - subPaid, open: sum(costs.filter((c) => c.status === 'offen'), (c) => c.amount), offers: sum(costs.filter((c) => c.status === 'angebot'), (o) => Math.max(0, o.amount - sum(real.filter((c) => c.offerId === o.id), (c) => c.amount))) };
 }
 
 // ---------- Quick-Links (Übersicht) ----------
@@ -593,6 +593,22 @@ function viewDiary() {
 }
 
 // ---------- Dokumente an Kosten/Angeboten ----------
+// Abschlagszahlungen: Rechnungen, die mit einem Angebot verknüpft sind und darauf angerechnet werden
+function offerSplit(o) {
+  const ps = Store.all('costs').filter((c) => c.offerId === o.id && c.status !== 'angebot').sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const paid = sum(ps.filter((c) => c.status === 'bezahlt'), (c) => c.amount);
+  const inv = sum(ps.filter((c) => c.status === 'offen'), (c) => c.amount);
+  return { ps, paid, inv, open: Math.max(0, o.amount - paid), rest: Math.max(0, o.amount - paid - inv), over: paid + inv - o.amount };
+}
+const offerOf = (c) => (c.offerId ? Store.get('costs', c.offerId) : null);
+function offerBar(o) {
+  const sp = offerSplit(o);
+  const segs = [{ label: 'Bezahlt', value: sp.paid, color: 'var(--viz-3)' }, { label: 'Rechnung offen', value: sp.inv, color: 'var(--viz-2)' }, { label: 'Noch nicht abgerufen', value: sp.rest, color: 'var(--viz-track)' }];
+  return h('div', { class: 'offsplit' }, stackBar(segs, Math.max(o.amount, sp.paid + sp.inv)),
+    h('div', { class: 'offtxt' }, h('span', {}, h('b', {}, fmtEUR(sp.paid)), ' bezahlt'), h('span', {}, h('b', {}, fmtEUR(sp.open)), ' offen')),
+    sp.inv > 0 && h('div', { class: 'muted small' }, `davon ${fmtEUR(sp.inv)} bereits in Rechnung gestellt`),
+    sp.over > 0.005 && h('div', { class: 'viz-warn small' }, icon('warning', { filled: true, size: 16 }), ` Abschläge übersteigen das Angebot um ${fmtEUR(sp.over)}`));
+}
 const costDocCat = (status) => (status === 'angebot' ? 'Angebote' : 'Rechnungen');
 const docsOfCost = (c) => (c.docIds || []).map((id) => Store.get('documents', id)).filter(Boolean);
 const costsOfDoc = (d) => Store.all('costs').filter((c) => (c.docIds || []).includes(d.id));
@@ -652,8 +668,8 @@ function docAttachField(initial = [], meta = () => ({})) {
 }
 
 // ---------- Ansicht: Kosten ----------
-function costForm(entry) {
-  const e = entry || { date: today(), title: '', amount: '', vendor: '', phaseId: '', status: 'offen', note: '', photos: [] };
+function costForm(entry, preset) {
+  const e = entry || { date: today(), title: '', amount: '', vendor: '', phaseId: '', status: 'offen', note: '', photos: [], ...(preset || {}) };
   const date = h('input', { type: 'date', required: true, value: e.date });
   const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Rechnung Elektro, Abschlag 1', value: e.title });
   const amount = dec({ required: true, step: '0.01', min: '0', inputmode: 'decimal', value: e.amount });
@@ -666,12 +682,28 @@ function costForm(entry) {
   const subBox = h('div', { class: 'subbox' }, field('Förderbetrag (EUR)', subAmt, 'Der Teil dieser Rechnung, der gefördert wird bzw. erstattet wird.'), h('label', { class: 'check' }, subPaid, h('span', {}, 'Förderung bereits ausgezahlt')));
   subBox.hidden = !subOn.checked;
   subOn.addEventListener('change', () => { subBox.hidden = !subOn.checked; });
+  // Abschlagszahlung: mit einem Angebot verknüpfen und darauf anrechnen
+  const offers = Store.all('costs').filter((c) => c.status === 'angebot' && c.id !== e.id).sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const isPart = h('input', { type: 'checkbox', checked: !!e.offerId });
+  const offerSel = h('select', { value: e.offerId || '' }, [h('option', { value: '' }, '– Angebot wählen –'), ...offers.map((o) => h('option', { value: o.id, selected: o.id === e.offerId }, `${o.title}${o.vendor ? ' · ' + o.vendor : ''} · ${fmtEUR(o.amount)}`))]);
+  const partBox = h('div', { class: 'subbox' }, field('Angebot', offerSel, 'Der Betrag wird auf dieses Angebot angerechnet: das Angebot zeigt dann einen Teil als bezahlt und den Rest als offen.'));
+  const partWrap = h('div', {}, offers.length ? [h('label', { class: 'check' }, isPart, h('span', {}, 'Abschlagszahlung zu einem Angebot')), partBox] : h('p', { class: 'muted small' }, 'Für Abschlagszahlungen zuerst ein Angebot anlegen.'));
+  const syncPart = () => { partWrap.hidden = status.value === 'angebot'; partBox.hidden = !isPart.checked; };
+  isPart.addEventListener('change', syncPart); status.addEventListener('change', syncPart); syncPart();
+  offerSel.addEventListener('change', () => {
+    const o = Store.get('costs', offerSel.value); if (!o) return;
+    if (!vendor.value.trim() && o.vendor) vendor.value = o.vendor;
+    if (!phase.value && o.phaseId) phase.value = o.phaseId;
+    if (!title.value.trim()) title.value = `Abschlag ${offerSplit(o).ps.filter((c) => c.id !== e.id).length + 1} ${o.title}`;
+  });
+  const split = entry && e.status === 'angebot' ? offerSplit(e) : null;
+  const splitEl = split && split.ps.length ? h('div', { class: 'subbox' }, h('strong', {}, 'Abschlagszahlungen'), offerBar(e), split.ps.map((c) => h('div', { class: 'split small' }, h('span', {}, `${fmtDate(c.date)} · ${c.title}`), h('span', {}, fmtEUR(c.amount), ' ', chip(c.status === 'bezahlt' ? 'bezahlt' : 'offen', 'cs-' + c.status))))) : null;
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
   const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
-      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
+      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, offerId: status.value !== 'angebot' && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
       // Dokumente mit dem Kosten-Eintrag abgleichen: Kategorie (Angebot/Rechnung) und Gewerk
       for (const d of docsOfCost(saved)) {
@@ -835,6 +867,9 @@ function viewCosts() {
             h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(c.date)), chip(COST_STATES.find((s) => s[0] === c.status)?.[1] || c.status, 'cs-' + c.status)),
             h('div', { class: 'split' }, h('h3', {}, c.title), h('strong', { class: 'amount' }, fmtEUR(c.amount))),
             h('div', { class: 'muted small' }, [c.vendor, phaseName(c.phaseId)].filter(Boolean).join(' · ')),
+            offerOf(c) && h('div', {}, chip('Abschlag zu ' + offerOf(c).title, 'cs-angebot')),
+            c.status === 'angebot' && offerSplit(c).ps.length ? offerBar(c) : null,
+            c.status === 'angebot' && h('div', {}, h('button', { type: 'button', class: 'btn small', onclick: (ev) => { ev.stopPropagation(); costForm(null, { status: 'offen', offerId: c.id, vendor: c.vendor || '', phaseId: c.phaseId || '', title: `Abschlag ${offerSplit(c).ps.length + 1} ${c.title}` }); } }, icon('add', { size: 18 }), ' Abschlag anlegen')),
             c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
             docsOfCost(c).length ? h('div', { class: 'att-chips' }, docsOfCost(c).map((d) => h('button', { type: 'button', class: 'tchip plain attc', onclick: (ev) => { ev.stopPropagation(); openDoc(d); } }, icon('attach_file', { size: 14 }), ' ' + d.name))) : null,
             photoStrip(c.photos)

@@ -630,3 +630,8 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 dialog.drawer[open] { display: flex; flex-direction: column; }
 .drawer-list { flex: 1; overflow-y: auto; }
 .drawer-item.last { margin-top: auto; border-top: 1px solid var(--line, rgba(128,128,128,.25)); border-radius: 0 0 12px 12px; padding-top: 15px; }
+
+/* Abschläge am Angebot */
+.offsplit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.offtxt { display: flex; justify-content: space-between; font-size: .9rem; }
+.subbox .split.small { gap: 8px; align-items: center; }
