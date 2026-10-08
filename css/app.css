@@ -842,3 +842,4 @@ input, select, textarea { font-size: max(16px, 1em); }
 .tsec.closed .tsec-h { padding-bottom: 0; }
 .tsec-late .tsec-h > span:nth-child(2) { color: var(--bad); }
 .tsec { padding-top: 12px; gap: 0; } .tsec .tsec-h { margin: 0; }
+.sheet-body:focus { outline: none; }

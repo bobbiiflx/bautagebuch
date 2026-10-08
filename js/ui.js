@@ -144,12 +144,10 @@ export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, 
   dlg.append(form);
   document.body.append(dlg);
   dlg.showModal();
-  // Fokus: erstes Eingabefeld (nur wenn es unter den ersten Feldern steht), sonst neutral – nie auf „Abbrechen“
+  // Fokus neutral auf den Inhalt: keine Tastatur, kein Sprung ins Textfeld, nie auf „Abbrechen“
   const bodyEl = dlg.querySelector('.sheet-body');
-  const fields = [...bodyEl.querySelectorAll('.field')].slice(0, 3);
-  const first = fields.map((f) => f.querySelector('input, textarea, select')).find((el) => el && !el.disabled && !el.readOnly && (el.tagName === 'TEXTAREA' || ['text', 'search', 'tel', 'email', 'url', 'number'].includes(el.type || 'text')));
-  if (first) first.focus({ preventScroll: true });
-  else { bodyEl.tabIndex = -1; bodyEl.focus({ preventScroll: true }); }
+  bodyEl.tabIndex = -1;
+  bodyEl.focus({ preventScroll: true });
   return dlg;
 }
 
@@ -572,7 +570,6 @@ function swipeDel(card, doDelete, right = null, label = 'Löschen') {
 async function deleteTodo(t) {
   for (const x of successors(t)) await Store.save('todos', { ...x, after: (x.after || []).filter((id) => id !== t.id) });
   await Store.remove('todos', t.id);
-  await syncPhase(t.phaseId);
 }
 
 const compList = (d) => [...new Map([...(d.companies || []), ...whoList(d).filter((w) => companyOf(w))].map((n) => [norm(n), companyOf(n)?.name || n])).values()];
@@ -1518,22 +1515,10 @@ function viewDefects() {
 }
 
 // ---------- Ansicht: Aufgaben ----------
-// Aufgaben einer Phase bestimmen deren Fortschritt (erledigt / alle), höchstens 95 %.
-// 100 % und „Fertig“ werden immer von Hand gesetzt.
+// Der Fortschritt einer Phase wird von Hand gesetzt und ist unabhängig von den Aufgaben.
 const todosOf = (phaseId) => Store.all('todos').filter((t) => t.phaseId === phaseId);
-async function syncPhase(phaseId) {
-  const ph = phaseId && Store.get('phases', phaseId);
-  if (!ph || ph.progress >= 100 || ph.state === 'fertig') return;
-  const list = todosOf(phaseId);
-  if (!list.length) return;
-  const pct = Math.min(95, Math.round((list.filter((t) => t.done).length / list.length) * 100));
-  const state = pct > 0 ? 'laeuft' : ph.state === 'laeuft' && ph.progress > 0 ? 'geplant' : ph.state;
-  if (pct !== ph.progress || state !== ph.state) await Store.save('phases', { ...ph, progress: pct, state });
-}
-async function saveTodo(t, oldPhaseId) {
+async function saveTodo(t) {
   await Store.save('todos', t);
-  await syncPhase(t.phaseId);
-  if (oldPhaseId && oldPhaseId !== t.phaseId) await syncPhase(oldPhaseId);
 }
 // Abhängigkeiten: t.after = IDs von Aufgaben, die vorher erledigt sein müssen
 const preds = (t) => (t.after || []).map((id) => Store.get('todos', id)).filter(Boolean);
@@ -1551,7 +1536,7 @@ async function toggleTodo(t, done) {
   if (wait.length && !(await askConfirm(`Noch offen: ${wait.map((p) => p.title).join(', ')}. Trotzdem als erledigt markieren?`, 'Erledigt'))) { render(); return; }
   const el = done && document.querySelector(`.todo[data-id="${t.id}"]`);
   if (el) { el.querySelector('.todo-chk')?.replaceChildren(icon('check', { size: 20 })); el.classList.add('todo-pop'); await new Promise((r) => setTimeout(r, 420)); }
-  await saveTodo({ ...t, done }, t.phaseId);
+  await saveTodo({ ...t, done });
   if (done && t.phaseId) {
     const rest = Store.all('todos').filter((x) => x.phaseId === t.phaseId);
     if (rest.length >= 2 && rest.every((x) => x.done)) confetti();
@@ -1583,12 +1568,11 @@ function todoForm(entry, presetPhase = '') {
   const boxes = cand.map((x) => h('label', { class: 'depopt' + (x.done ? ' done' : '') }, h('input', { type: 'checkbox', checked: picked.has(x.id), onchange: (ev) => (ev.target.checked ? picked.add(x.id) : picked.delete(x.id)) }), h('span', {}, x.title, h('small', { class: 'muted' }, ' · ' + (x.done ? 'erledigt' : phaseName(x.phaseId) || 'offen')))));
   const dep = cand.length ? h('div', { class: 'deplist' }, boxes) : h('div', { class: 'muted small' }, 'Noch keine anderen Aufgaben.');
   const succ = entry ? successors(entry) : [];
-  sheet(entry ? 'Aufgabe bearbeiten' : 'Neue Aufgabe', [field('Aufgabe', title), field('Fällig am', due), field('Zuständig', assignee), dl, field('Planungsschritt', phase, 'Erledigte Aufgaben erhöhen den Fortschritt dieses Schritts.'), field('Wartet auf', dep, 'Diese Aufgaben müssen zuerst erledigt sein.'), succ.length ? h('div', { class: 'muted small' }, icon('link', { size: 16 }), ' Blockiert: ' + succ.map((x) => x.title).join(', ')) : null, field('Notiz', note)], {
-    onSave: () => saveTodo({ ...e, title: title.value.trim(), due: due.value, assignee: assignee.value.trim(), phaseId: phase.value, note: note.value.trim(), after: [...picked] }, e.phaseId),
+  sheet(entry ? 'Aufgabe bearbeiten' : 'Neue Aufgabe', [field('Aufgabe', title), field('Fällig am', due), field('Zuständig', assignee), dl, field('Planungsschritt', phase), field('Wartet auf', dep, 'Diese Aufgaben müssen zuerst erledigt sein.'), succ.length ? h('div', { class: 'muted small' }, icon('link', { size: 16 }), ' Blockiert: ' + succ.map((x) => x.title).join(', ')) : null, field('Notiz', note)], {
+    onSave: () => saveTodo({ ...e, title: title.value.trim(), due: due.value, assignee: assignee.value.trim(), phaseId: phase.value, note: note.value.trim(), after: [...picked] }),
     onDelete: entry && (async () => {
       for (const x of succ) await Store.save('todos', { ...x, after: (x.after || []).filter((id) => id !== e.id) });
       await Store.remove('todos', e.id);
-      await syncPhase(e.phaseId);
     }),
   });
 }
@@ -2086,7 +2070,7 @@ function phaseForm(entry) {
     out.textContent = range.value + ' %';
   });
   sheet(entry ? e.name : 'Eigene Phase', [field('Name', name), field('Status', state), h('label', { class: 'field' }, h('span', { class: 'lbl' }, 'Fortschritt ', out), range), field('Geplanter Beginn', start), field('Geplantes Ende', end), field('3D-Animation startet bei (%)', animAt), field('Notiz', note)], {
-    onSave: async () => { await Store.save('phases', { ...e, name: name.value.trim(), state: state.value, progress: Number(range.value), start: start.value, end: end.value, animAt: Math.min(100, Math.max(1, Number(animAt.value) || 10)), note: note.value.trim() }); await syncPhase(e.id); },
+    onSave: async () => { await Store.save('phases', { ...e, name: name.value.trim(), state: state.value, progress: Number(range.value), start: start.value, end: end.value, animAt: Math.min(100, Math.max(1, Number(animAt.value) || 10)), note: note.value.trim() }); },
     onDelete: entry && !isDefaultPhase(e.id) ? () => Store.remove('phases', e.id) : null,
   });
 }
@@ -2147,7 +2131,7 @@ function viewPlan() {
     'div',
     { class: 'view' },
     h('div', { class: 'seg' }, [['liste', 'Liste'], ['zeit', 'Zeitleiste']].map(([k, t]) => h('button', { class: 'pill' + (planTab === k ? ' on' : ''), onclick: () => { planTab = k; render(); } }, t))),
-    h('section', { class: 'card' }, h('div', { class: 'split' }, h('h3', {}, 'Gesamtfortschritt'), h('strong', {}, pct + ' %')), bar(pct), h('p', { class: 'muted small' }, 'Die Reihenfolge änderst du, indem du eine Phase am Griff nach oben oder unten ziehst. Erledigte Aufgaben erhöhen den Fortschritt bis 95 %, „Fertig“ (100 %) setzt du selbst.')),
+    h('section', { class: 'card' }, h('div', { class: 'split' }, h('h3', {}, 'Gesamtfortschritt'), h('strong', {}, pct + ' %')), bar(pct), h('p', { class: 'muted small' }, 'Die Reihenfolge änderst du, indem du eine Phase am Griff nach oben oder unten ziehst.  Den Fortschritt jeder Phase stellst du selbst ein, er ist unabhängig von den Aufgaben.')),
     planTab === 'zeit' ? planTimeline(list) : list.map((p) =>
       h(
         'article',
