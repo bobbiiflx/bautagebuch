@@ -309,6 +309,53 @@ function costSums(costs = Store.all('costs')) {
   return { spent, subPaid, subOpen, net: spent - subPaid, open: sum(costs.filter((c) => c.status === 'offen'), (c) => c.amount), offers: sum(costs.filter((c) => c.status === 'angebot'), (c) => c.amount) };
 }
 
+// ---------- Quick-Links (Übersicht) ----------
+const QUICK = {
+  'r:einkauf': ['Einkauf', 'shopping_cart', () => go('einkauf'), () => Store.all('shopping').filter((l) => !l.done).length],
+  'r:aufgaben': ['Aufgaben', 'task_alt', () => go('aufgaben'), () => Store.all('todos').filter((t) => !t.done).length],
+  'r:maengel': ['Mängel', 'warning', () => go('maengel'), () => Store.all('defects').filter((d) => d.status === 'offen' || d.status === 'klaerung').length],
+  'r:dokumente': ['Dokumente', 'folder', () => go('dokumente')],
+  'r:kosten': ['Kosten', 'payments', () => go('kosten')],
+  'r:tagebuch': ['Tagebuch', 'menu_book', () => go('tagebuch')],
+  'r:planung': ['Planung', 'calendar_month', () => go('planung')],
+  'r:finanzierung': ['Finanzierung', 'account_balance', () => go('finanzierung')],
+  'r:haus': ['3D-Haus', 'view_in_ar', () => go('haus')],
+  'r:suche': ['Suche', 'search', () => go('suche')],
+  'n:diary': ['Neuer Eintrag', 'add', () => diaryForm()],
+  'n:defect': ['Neuer Mangel', 'add', () => defectForm()],
+  'n:todo': ['Neue Aufgabe', 'add', () => todoForm()],
+  'n:cost': ['Neue Kosten', 'add', () => costForm()],
+  'n:shop': ['Neuer Einkaufszettel', 'add', () => { go('einkauf'); shopListForm(); }],
+};
+const QUICK_DEFAULT = ['r:einkauf', 'r:aufgaben', 'r:dokumente'];
+const quickIds = () => {
+  const mine = Store.get('settings', 'quicklinks')?.byUser?.[Store.getUserName()];
+  return [0, 1, 2].map((i) => (mine?.[i] in QUICK ? mine[i] : QUICK_DEFAULT[i]));
+};
+function quickForm() {
+  const cur = quickIds();
+  const sels = cur.map((v, i) => h('select', { 'aria-label': `Kachel ${i + 1}` },
+    h('optgroup', { label: 'Öffnen' }, Object.entries(QUICK).filter(([k]) => k.startsWith('r:')).map(([k, q]) => h('option', { value: k, selected: k === v }, q[0]))),
+    h('optgroup', { label: 'Neu anlegen' }, Object.entries(QUICK).filter(([k]) => k.startsWith('n:')).map(([k, q]) => h('option', { value: k, selected: k === v }, q[0])))));
+  sheet('Quick-Links', [h('p', { class: 'muted small' }, 'Drei Kacheln auf der Übersicht – für dich eingestellt, auf all deinen Geräten gleich.'), ...sels.map((x, i) => field(`Kachel ${i + 1}`, x))], {
+    onSave: async () => {
+      const doc = Store.get('settings', 'quicklinks') || { id: 'quicklinks', byUser: {} };
+      await Store.save('settings', { ...doc, byUser: { ...(doc.byUser || {}), [Store.getUserName()]: sels.map((x) => x.value) } });
+    },
+  });
+}
+function quickTiles() {
+  return h('section', { class: 'quick' },
+    h('div', { class: 'qtiles' }, quickIds().map((id) => {
+      const [label, ic, fn, badge] = QUICK[id];
+      const n = badge ? badge() : 0;
+      return h('button', { type: 'button', class: 'qtile', onclick: fn },
+        h('span', { class: 'qi' }, icon(ic, { size: 26 }), n ? h('span', { class: 'qb' }, String(n)) : null),
+        h('span', { class: 'ql' }, label));
+    })),
+    h('button', { type: 'button', class: 'btn-text small qedit', onclick: quickForm }, icon('edit', { size: 16 }), ' Anpassen'));
+}
+
 function viewHome() {
   const ph = phases();
   const pct = progressOf(ph);
@@ -335,6 +382,7 @@ function viewHome() {
         ph.filter((p) => p.state === 'fertig').map((p) => chip([phaseIcon(p, { size: 15 }), ` ${p.name.split(' ')[0].replace(',', '')}`], 'done'))) : null,
       !running.length && next && h('div', { class: 'muted small' }, `Als Nächstes geplant: ${next.name}`)
     ),
+    quickTiles(),
     h(
       'div',
       { class: 'stats' },

@@ -615,3 +615,13 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 .sheet-save { margin-top: 6px; position: sticky; bottom: calc(env(safe-area-inset-bottom) + 10px); z-index: 2; box-shadow: 0 0 0 6px var(--bg); }
 
 .shi.static.skipped .shi-n { opacity: .55; }
+
+/* Quick-Links */
+.quick { display: grid; gap: 2px; }
+.qtiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.qtile { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 6px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(16, 24, 40, .04); transition: transform .12s; }
+.qtile:active { transform: scale(.97); }
+.qi { position: relative; width: 48px; height: 48px; border-radius: 15px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.qb { position: absolute; top: -6px; right: -8px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: .72rem; font-weight: 700; display: grid; place-items: center; border: 2px solid var(--card); box-sizing: content-box; }
+.ql { font-size: .82rem; font-weight: 600; text-align: center; line-height: 1.2; }
+.qedit { justify-self: end; display: inline-flex; align-items: center; gap: 4px; }
