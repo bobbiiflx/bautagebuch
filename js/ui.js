@@ -458,7 +458,7 @@ function diaryForm(entry) {
 
 // ---------- Ansicht: Tagebuch ----------
 // Wochenleiste mit Heute-Linie, farbige Karten je Gewerk, Detailbereich (Tablet) bzw. Detailblatt (Handy)
-const dv = { range: 'week', anchor: today(), day: '', phase: '', who: '', group: 'day', sel: '' };
+const dv = { range: 'week', anchor: today(), day: '', fphase: new Set(), fwho: new Set(), group: 'day', sel: '' };
 const isoOf = (d) => d.toLocaleDateString('sv-SE');
 const dateOf = (iso) => new Date(iso + 'T12:00:00');
 const addDays = (iso, n) => { const d = dateOf(iso); d.setDate(d.getDate() + n); return isoOf(d); };
@@ -535,7 +535,7 @@ function viewDiary() {
     return true;
   };
   const whoAll = [...new Set(all.flatMap(whoList))].sort((a, b) => a.localeCompare(b, 'de'));
-  const list = all.filter((d) => inRange(d) && (!dv.phase || d.phaseId === dv.phase) && (!dv.who || whoList(d).some((w) => w.toLowerCase() === dv.who.toLowerCase()))).sort(byDateDesc);
+  const list = all.filter((d) => inRange(d) && (!dv.fphase.size || dv.fphase.has(d.phaseId)) && (!dv.fwho.size || whoList(d).some((w) => [...dv.fwho].some((x) => x.toLowerCase() === w.toLowerCase())))).sort(byDateDesc);
   if (wide && !list.some((d) => d.id === dv.sel)) dv.sel = list[0]?.id || '';
   const set = (patch) => { Object.assign(dv, patch); render(); };
 
@@ -558,12 +558,11 @@ function viewDiary() {
     })));
 
   // Filterleiste
-  const pillSel = (ic, value, options, onch, any) => h('label', { class: 'pillsel' + (value ? ' on' : '') }, icon(ic, { size: 18 }), h('select', { value, onchange: (e) => onch(e.target.value), 'aria-label': any }, h('option', { value: '' }, any), options.map(([v, t]) => h('option', { value: v, selected: v === value }, t))));
-  const filters = h('div', { class: 'pills dfilters' },
-    h('div', { class: 'segmini' }, [['week', 'Woche'], ['month', 'Monat'], ['all', 'Alle']].map(([k, t]) => h('button', { class: dv.range === k && !dv.day ? 'on' : '', onclick: () => set({ range: k, day: '' }) }, t))),
-    pillSel('layers', dv.phase, phases().map((p) => [p.id, p.name]), (v) => set({ phase: v }), 'Alle Gewerke'),
-    pillSel('groups', dv.who, whoAll.map((w) => [w, w]), (v) => set({ who: v }), 'Alle Personen'),
-    pillSel('menu_book', dv.group === 'phase' ? 'phase' : '', [['phase', 'nach Gewerk']], (v) => set({ group: v || 'day' }), 'nach Tag'));
+  const rangeTabs = h('div', { class: 'seg' }, [['week', 'Woche'], ['month', 'Monat'], ['all', 'Alle']].map(([k, t]) => h('button', { class: 'pill' + (dv.range === k && !dv.day ? ' on' : ''), onclick: () => set({ range: k, day: '' }) }, t)));
+  const filters = filterBar(dv, [
+    { title: 'Gewerk', key: 'fphase', items: phases().map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
+    { title: 'Person', key: 'fwho', items: whoAll.map((w) => ({ v: w, t: w, icon: icon('groups', { size: 22 }) })) },
+  ], h('button', { type: 'button', class: 'pill small fpill' + (dv.group === 'phase' ? ' on' : ''), 'aria-pressed': String(dv.group === 'phase'), onclick: () => set({ group: dv.group === 'phase' ? 'day' : 'phase' }) }, icon('layers', { size: 18 }), ' Nach Gewerk'));
 
   const card = (d) => {
     const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
@@ -584,11 +583,11 @@ function viewDiary() {
   else {
     const groups = new Map();
     for (const d of list) { const k = dv.group === 'phase' ? (d.phaseId || '') : d.date; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); }
-    body = [...groups].map(([k, es]) => h('section', { class: 'dgroup' }, h('h4', { class: 'dg-h' }, dv.group === 'phase' ? (k ? phaseName(k) : 'Ohne Gewerk') : dLong(k), h('span', { class: 'muted small' }, ` ${es.length}`)), es.map(card)));
+    body = [...groups].map(([k, es]) => h('section', { class: 'dgroup' }, h('h4', { class: 'dg-h' }, dv.group === 'phase' ? (k ? phaseName(k) : 'Ohne Gewerk') : dLong(k), h('span', { class: 'dg-n muted small' }, ` · ${es.length} ${es.length === 1 ? 'Eintrag' : 'Einträge'}`)), es.map(card)));
   }
   const selected = wide ? all.find((d) => d.id === dv.sel) : null;
   return h('div', { class: 'view diary' + (wide ? ' wide' : '') },
-    h('div', { class: 'd-main' }, strip, filters, body),
+    h('div', { class: 'd-main' }, rangeTabs, strip, filters, body),
     wide && h('aside', { class: 'd-side' }, selected ? diaryDetail(selected, () => diaryForm(selected)) : h('div', { class: 'empty' }, h('p', { class: 'muted' }, 'Wähle links einen Eintrag.'))),
     fab(() => diaryForm())
   );
@@ -703,7 +702,7 @@ function costForm(entry, preset) {
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
   const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
       const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
@@ -916,12 +915,10 @@ function viewCosts() {
   const usages = [...phases(), ...tradeOptions()];
 
   const usedUsage = usages.filter((p) => all.some((c) => c.phaseId === p.id));
-  const fBar = h('div', { class: 'pills dfilters' },
-    h('button', { type: 'button', class: 'pill small fpill' + (fcount ? ' on' : ''), onclick: () => filterSheet(costFilter, [
-      { title: 'Status', key: 'status', items: COST_STATES.map(([v, t]) => ({ v, t, icon: icon(COST_ICONS[v] || 'receipt_long', { size: 22 }) })) },
-      { title: 'Gewerk / Verwendung', key: 'phase', items: usedUsage.map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
-    ]) }, icon('tune', { size: 18 }), ' Filter', fcount ? h('span', { class: 'fcount' }, String(fcount)) : null),
-    fcount ? h('button', { class: 'btn-text small', onclick: () => { costFilter.phase.clear(); costFilter.status.clear(); render(); } }, 'Zurücksetzen') : null);
+  const fBar = filterBar(costFilter, [
+    { title: 'Status', key: 'status', items: COST_STATES.map(([v, t]) => ({ v, t, icon: icon(COST_ICONS[v] || 'receipt_long', { size: 22 }) })) },
+    { title: 'Gewerk', key: 'phase', items: usedUsage.map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
+  ]);
   const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Belege (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
 
   const summary = [
@@ -1141,7 +1138,7 @@ function defectForm(entry) {
   const due = h('input', { type: 'date', value: e.due || '' });
   const date = h('input', { type: 'date', required: true, value: e.date });
   const pf = photoField(e.photos);
-  sheet(entry ? 'Mangel bearbeiten' : 'Neuer Mangel', [field('Festgestellt am', date), field('Titel', title), field('Beschreibung', desc), field('Ort', room), dl, field('Gewerk / Phase', phase), field('Verantwortlich', vendor), field('Status', status), field('Frist zur Behebung', due), pf.el], {
+  sheet(entry ? 'Mangel bearbeiten' : 'Neuer Mangel', [field('Festgestellt am', date), field('Titel', title), field('Beschreibung', desc), field('Ort', room), dl, field('Gewerk', phase), field('Verantwortlich', vendor), field('Status', status), field('Frist zur Behebung', due), pf.el], {
     onSave: async () => {
       await Store.save('defects', { ...e, date: date.value, title: title.value.trim(), description: desc.value.trim(), room: room.value.trim(), phaseId: phase.value, vendor: vendor.value.trim(), status: status.value, due: due.value, photos: pf.ids });
       await pf.commit();
@@ -1151,16 +1148,24 @@ function defectForm(entry) {
   });
 }
 
-let defectFilter = 'aktiv';
+let defectTab = 'aktiv';
+const defectFilter = { status: new Set(), phase: new Set() };
 function viewDefects() {
   const all = Store.all('defects');
   const active = (d) => d.status === 'offen' || d.status === 'klaerung';
-  const filters = [['aktiv', `Aktiv (${all.filter(active).length})`], ['alle', 'Alle'], ...DEFECT_STATES.map(([v, t]) => [v, t])];
-  const list = all.filter((d) => (defectFilter === 'alle' ? true : defectFilter === 'aktiv' ? active(d) : d.status === defectFilter)).sort(byDateDesc);
+  const nAct = all.filter(active).length;
+  const tabsDef = [['aktiv', `Aktiv (${nAct})`], ['erledigt', `Behoben (${all.length - nAct})`], ['alle', `Alle (${all.length})`]];
+  const list = all.filter((d) => (defectTab === 'alle' || (defectTab === 'aktiv') === active(d)) && (!defectFilter.status.size || defectFilter.status.has(d.status)) && (!defectFilter.phase.size || defectFilter.phase.has(d.phaseId))).sort(byDateDesc);
+  const usedUsage = [...phases(), ...tradeOptions()].filter((p) => all.some((d) => d.phaseId === p.id));
+  const DEF_ICONS = { offen: 'error', klaerung: 'warning', behoben: 'check_circle', abgenommen: 'task_alt' };
   return h(
     'div',
     { class: 'view' },
-    h('div', { class: 'pills' }, filters.map(([v, t]) => h('button', { class: 'pill' + (defectFilter === v ? ' on' : ''), onclick: () => { defectFilter = v; render(); } }, t))),
+    h('div', { class: 'seg' }, tabsDef.map(([v, t]) => h('button', { class: 'pill' + (defectTab === v ? ' on' : ''), onclick: () => { defectTab = v; render(); } }, t))),
+    filterBar(defectFilter, [
+      { title: 'Status', key: 'status', items: DEFECT_STATES.map(([v, t]) => ({ v, t, icon: icon(DEF_ICONS[v] || 'warning', { size: 22 }) })) },
+      { title: 'Gewerk', key: 'phase', items: usedUsage.map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
+    ]),
     list.length
       ? list.map((d) =>
           h(
@@ -1337,7 +1342,7 @@ function shopListForm(list) {
   dlg = sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [
     field('Wo wird eingekauft?', h('div', { class: 'stpick' }, chips, more, own, chosen)),
     field('Name des Zettels', title),
-    field('Gewerk / Verwendung (optional)', phase),
+    field('Gewerk (optional)', phase),
     finish], {
     saveLabel: list ? 'Speichern' : 'Zettel anlegen',
     onSave: () => Store.save('shopping', { ...e, title: title.value.trim() || store || 'Einkaufszettel', store, phaseId: phase.value }),
@@ -1355,7 +1360,7 @@ function shopItemForm(listId, item) {
   const price = dec({ step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'optional', value: it.price ?? '' });
   const phase = usageSelect(it.phaseId);
   const pf = photoField(it.photos || []);
-  sheet(item ? 'Produkt' : 'Neues Produkt', [field('Produkt', name), field('Menge', qty), field('Preis (EUR)', price), field('Notiz', note), field('Gewerk / Verwendung', phase), pf.el], {
+  sheet(item ? 'Produkt' : 'Neues Produkt', [field('Produkt', name), field('Menge', qty), field('Preis (EUR)', price), field('Notiz', note), field('Gewerk', phase), pf.el], {
     onSave: async () => {
       const cur = Store.get('shopping', listId) || l;
       const upd = { ...it, name: name.value.trim(), qty: qty.value.trim(), note: note.value.trim(), price: price.value === '' ? '' : Number(price.value), phaseId: phase.value, photos: pf.ids };
@@ -1852,7 +1857,7 @@ function docFields(init) {
         } }, 'Übernehmen'),
         h('button', { type: 'button', class: 'btn-text small', onclick: () => { dismissed = key; box.replaceChildren(); } }, 'Ignorieren'))));
   };
-  return { cat, phase, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk / Phase', phase), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
+  return { cat, phase, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk', phase), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
 }
 
 // Datei-Eingaben liegen dauerhaft im Dokument (nicht in der Ansicht): Beim Öffnen der Kamera kann die Ansicht neu zeichnen,
@@ -1961,6 +1966,14 @@ function filterSheet(F, sections) {
     saveLabel: 'Anwenden',
     onSave: () => { sections.forEach((x) => { F[x.key] = tmp[x.key]; }); render(); },
   });
+}
+// Einheitliche Filterleiste: Button „Filter“ mit Zähler, optional „Zurücksetzen“ und weitere Elemente
+function filterBar(F, sections, ...extra) {
+  const n = sections.reduce((a, x) => a + F[x.key].size, 0);
+  return h('div', { class: 'pills dfilters' },
+    h('button', { type: 'button', class: 'pill small fpill' + (n ? ' on' : ''), onclick: () => filterSheet(F, sections) }, icon('tune', { size: 18 }), ' Filter', n ? h('span', { class: 'fcount' }, String(n)) : null),
+    ...extra,
+    n ? h('button', { type: 'button', class: 'btn-text small', onclick: () => { sections.forEach((x) => F[x.key].clear()); render(); } }, 'Zurücksetzen') : null);
 }
 function docFilterSheet(opts) {
   filterSheet(docF, [{ title: 'Kategorie', key: 'cat', items: opts.cats }, { title: 'Gewerk', key: 'phase', items: opts.phases }, { title: 'Tags', key: 'tag', items: opts.tags }]);
@@ -2208,9 +2221,6 @@ function viewSettings() {
     card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
     card('Standort für das Wetter', locBox()),
-    card('Beispieldaten', h('p', { class: 'muted small' }, 'Füllt die Kosten mit Beispielen (Angebot mit Abschlägen, Budgetangebote, Rechnungen), damit du alles ausprobieren kannst. Die Einträge sind als „Beispieldaten“ markiert und werden wie echte Daten synchronisiert. Danach lassen sie sich mit einem Tipp wieder entfernen. Dein Budget ändert das nicht.'),
-      h('button', { class: 'btn block', onclick: async () => { await loadDemoCosts(); toast('Beispieldaten geladen.'); } }, icon('table_chart', { size: 18 }), ' Beispieldaten laden'),
-      demoCosts().length ? h('button', { class: 'btn block', onclick: async () => { if (await askConfirm(`${demoCosts().length} Beispiel-Einträge aus den Kosten entfernen?`, 'Entfernen')) { for (const c of demoCosts()) await Store.remove('costs', c.id); toast('Beispieldaten entfernt.'); } } }, icon('delete', { size: 18 }), ` Beispieldaten entfernen (${demoCosts().length})`) : null),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
     card('Startbildschirm', h('label', { class: 'switch-row' }, h('span', {}, 'Startbildschirm beim Öffnen zeigen'), h('input', { type: 'checkbox', role: 'switch', checked: splashOn(), onchange: (e) => setSplash(e.target.checked) })), h('p', { class: 'muted small' }, 'Gilt nur für dieses Gerät. Ein Tipp beendet den Startbildschirm sofort.')),
     docRulesCard(),
@@ -2233,7 +2243,7 @@ function viewSettings() {
       restoreIn,
       demoCount
         ? h('button', { class: 'btn block', onclick: async () => { await Store.removeDemo(); toast('Beispieldaten entfernt.'); } }, `Beispieldaten entfernen (${demoCount})`)
-        : h('button', { class: 'btn block', onclick: async () => { await Store.loadDemo(); toast('Beispieldaten geladen.'); } }, 'Beispieldaten zum Ausprobieren laden'),
+        : h('button', { class: 'btn block', onclick: async () => { await Store.loadDemo(); await loadDemoCosts(); toast('Beispieldaten geladen.'); } }, 'Beispieldaten zum Ausprobieren laden'),
       h('p', { class: 'muted small' }, 'Die Vollsicherung enthält alle Einträge samt Fotos, Dokumenten und Handschrift; die JSON-Datei nur die Texte und Zahlen. Beispieldaten sind markiert und lassen sich jederzeit mit einem Tipp entfernen. Sobald OneDrive verbunden ist, werden auch sie hochgeladen – bitte vorher entfernen.')
     ),
     h('p', { class: 'muted small center' }, `Bautagebuch ${CONFIG.version}`)

@@ -443,8 +443,6 @@ export async function loadDemo() {
   const demo = { demo: true };
   await save('diary', { ...demo, date: d(2), title: 'Container gestellt', text: 'Der 10-m³-Container steht vor dem Haus. Entkernung im Keller beginnt morgen.', phaseId: 'entkernung', photos: [] });
   await save('diary', { ...demo, date: d(5), title: 'Öltank leergepumpt', text: 'Tank wurde fachgerecht entleert, Entsorgungsnachweis liegt bei.', phaseId: 'oeltank', photos: [] });
-  await save('costs', { ...demo, date: d(5), title: 'Tankentsorgung', amount: 1480, vendor: 'Beispiel Entsorgung GmbH', phaseId: 'oeltank', status: 'bezahlt', note: '', photos: [] });
-  await save('costs', { ...demo, date: d(1), title: 'Container 10 m³', amount: 620, vendor: 'Beispiel Container', phaseId: 'entkernung', status: 'offen', note: '', photos: [] });
   await save('defects', { ...demo, date: d(1), title: 'Riss im Kellerboden', description: 'Haarriss neben der Heizungsnische, bitte vor dem Estrich prüfen.', room: 'KG – Heizung/Technik', phaseId: 'estrich', status: 'offen', due: '', photos: [] });
   await save('todos', { ...demo, title: 'Angebote für Fenster einholen', due: d(-7), done: false, assignee: '', phaseId: 'fenster' });
   const oel = get('phases', 'oeltank');

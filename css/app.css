@@ -16,6 +16,7 @@
   --chip-run-bg: #e9edfd;  --chip-run-fg: #2c47b5;
   --chip-offer-bg: #f1f2f5; --chip-offer-fg: #4b5563;
   --chip-bad-bg: #fde8e8;  --chip-bad-fg: #a63232;
+  --chip-warn-bg: #fdeee0;  --chip-warn-fg: #9a4a0f;
   --chip-sub-bg: #fdf3dc; --chip-sub-fg: #8a5a0b;
   --note-bg: #eef1fd; --note-fg: #2c3a7a;
   --note-warn-bg: #fdf3dc; --note-warn-fg: #6b4a0b;
@@ -34,6 +35,7 @@
     --chip-run-bg: #1d2440;  --chip-run-fg: #b6c3ff;
     --chip-offer-bg: #232833; --chip-offer-fg: #b4bcc9;
     --chip-bad-bg: #3a1f22;  --chip-bad-fg: #f3a9a9;
+    --chip-warn-bg: #3a2a1b;  --chip-warn-fg: #f2c096;
     --chip-sub-bg: #382d16; --chip-sub-fg: #f1cf8b;
     --note-bg: #1d2440; --note-fg: #c4cffb;
     --note-warn-bg: #382d16; --note-warn-fg: #f1cf8b;
@@ -50,6 +52,7 @@
   --chip-run-bg: #1d2440;  --chip-run-fg: #b6c3ff;
   --chip-offer-bg: #232833; --chip-offer-fg: #b4bcc9;
   --chip-bad-bg: #3a1f22;  --chip-bad-fg: #f3a9a9;
+    --chip-warn-bg: #3a2a1b;  --chip-warn-fg: #f2c096;
   --chip-sub-bg: #382d16; --chip-sub-fg: #f1cf8b;
   --note-bg: #1d2440; --note-fg: #c4cffb;
   --note-warn-bg: #382d16; --note-warn-fg: #f1cf8b;
@@ -118,7 +121,7 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 14px calc(var(--tab) + en
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .74rem; background: var(--line); color: var(--ink); white-space: nowrap; }
 .chip.done, .cs-bezahlt, .ds-behoben, .ds-abgenommen, .phs-fertig { background: var(--chip-done-bg); color: var(--chip-done-fg); }
-.chip.run, .phs-laeuft, .cs-offen, .ds-klaerung { background: var(--chip-run-bg); color: var(--chip-run-fg); }
+.chip.run, .phs-laeuft, .ds-klaerung { background: var(--chip-run-bg); color: var(--chip-run-fg); }
 .cs-angebot, .cs-budgetangebot { background: var(--chip-offer-bg); color: var(--chip-offer-fg); }
 .ds-offen { background: var(--chip-bad-bg); color: var(--chip-bad-fg); }
 .chip.dim { opacity: .6; }
@@ -676,3 +679,5 @@ input, select, textarea { font-size: max(16px, 1em); }
 .ovsep { border-top: 1px solid var(--line); margin: 4px 0; }
 .ovnet { align-items: baseline; gap: 12px; }
 .ovnet > span { display: flex; flex-direction: column; }
+
+.cs-offen, .chip.warn { background: var(--chip-warn-bg); color: var(--chip-warn-fg); }
