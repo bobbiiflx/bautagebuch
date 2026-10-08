@@ -783,8 +783,8 @@ function variantCard(all, sums, budget) {
       extra += sel.amount; lo += g.list[0].amount; hi += g.list[g.list.length - 1].amount;
       return h('div', { class: 'vgrp' }, h('div', { class: 'vgh' }, g.name),
         g.list.map((c) => h('button', { type: 'button', class: 'vopt' + (c.id === sel.id ? ' on' : ''), 'aria-pressed': c.id === sel.id ? 'true' : 'false', onclick: () => { varSel[g.k] = c.id; paint(); } },
-          h('span', { class: 'vt' }, c.title, c.vendor ? h('span', { class: 'muted small' }, ' · ' + c.vendor) : null),
-          h('span', { class: 'va' }, fmtEUR(c.amount), c.amount > g.list[0].amount ? h('span', { class: 'muted small' }, ' +' + fmtEUR(c.amount - g.list[0].amount)) : null))));
+          h('span', { class: 'vt' }, h('span', { class: 'vtt' }, c.title), c.vendor ? h('span', { class: 'muted small vtv' }, c.vendor) : null),
+          h('span', { class: 'va' }, fmtEUR(c.amount), c.amount > g.list[0].amount ? h('span', { class: 'muted small vd' }, '+' + fmtEUR(c.amount - g.list[0].amount)) : null))));
     });
     const total = base + extra, left = budget ? budget - total : null;
     const row = (l, v, cls) => h('div', { class: 'split vrow' + (cls ? ' ' + cls : '') }, h('span', {}, l), h('strong', {}, v));
@@ -2015,6 +2015,32 @@ function docRulesCard() {
       custom && h('button', { class: 'btn block', onclick: async () => { if (await askConfirm('Alle eigenen Änderungen an den Regeln verwerfen und die Standardregeln wiederherstellen?', 'Zurücksetzen')) await Store.remove('settings', 'docrules'); } }, 'Auf Standard zurücksetzen')));
 }
 
+// Beispieldaten für Kosten (zum Ausprobieren); alle Einträge sind mit demo: true markiert und lassen sich wieder entfernen
+const demoCosts = () => Store.all('costs').filter((c) => c.demo);
+async function loadDemoCosts() {
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const N = 'Beispieldaten';
+  const rows = [
+    ['d-elek', 'Angebot Elektro komplett', 'Elektro Müller', 'elektro', 18400, 'angebot', 40],
+    ['d-elek-1', 'Abschlag 1 Elektro', 'Elektro Müller', 'elektro', 5000, 'bezahlt', 25, 'd-elek'],
+    ['d-elek-2', 'Abschlag 2 Elektro', 'Elektro Müller', 'elektro', 4000, 'offen', 5, 'd-elek'],
+    ['d-fen-a', 'Fenster Kunststoff', 'Fensterbau Weber', 'fenster', 14900, 'budgetangebot', 30],
+    ['d-fen-b', 'Fenster Holz-Alu', 'Fensterbau Weber', 'fenster', 21800, 'budgetangebot', 30],
+    ['d-fen-c', 'Fenster Alu', 'Metallbau Krause', 'fenster', 26500, 'budgetangebot', 28],
+    ['d-heiz-a', 'Wärmepumpe', 'Haustechnik Schmidt', 'sanitaer', 32000, 'budgetangebot', 20],
+    ['d-heiz-b', 'Gas-Brennwert', 'Haustechnik Schmidt', 'sanitaer', 17500, 'budgetangebot', 20],
+    ['d-dach-a', 'Dacheindeckung Ziegel', 'Dachdecker Lang', 'dach', 28000, 'budgetangebot', 15],
+    ['d-dach-b', 'Dacheindeckung Betonstein', 'Dachdecker Lang', 'dach', 23500, 'budgetangebot', 15],
+    ['d-tank', 'Rechnung Öltank entfernen', 'Entsorgung Nord', 'oeltank', 3800, 'bezahlt', 90],
+    ['d-kern', 'Rechnung Entkernung', 'Abbruch Becker', 'entkernung', 6200, 'bezahlt', 70],
+    ['d-roh', 'Rechnung Rohbau Aufstockung', 'Bau Hoffmann', 'aufstockung', 7500, 'offen', 3],
+    ['d-solar', 'Anzahlung Solar', 'Solartechnik Berg', 'solar', 2000, 'bezahlt', 10, null, 500],
+  ];
+  for (const [id, title, vendor, phaseId, amount, status, ago, offerId, sub] of rows) {
+    await Store.save('costs', { id, date: day(ago), title, vendor, phaseId, amount, status, offerId: offerId || '', note: N, demo: true, photos: [], docIds: [], subsidy: !!sub, subsidyAmount: sub || 0, subsidyPaid: false });
+  }
+}
+
 // ---------- Ansicht: Einstellungen ----------
 function download(name, text, type = 'application/json') {
   const url = URL.createObjectURL(new Blob([text], { type }));
@@ -2140,6 +2166,9 @@ function viewSettings() {
     card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
     card('Standort für das Wetter', locBox()),
+    card('Beispieldaten', h('p', { class: 'muted small' }, 'Füllt die Kosten mit Beispielen (Angebot mit Abschlägen, Budgetangebote, Rechnungen), damit du alles ausprobieren kannst. Die Einträge sind als „Beispieldaten“ markiert und werden wie echte Daten synchronisiert. Danach lassen sie sich mit einem Tipp wieder entfernen. Dein Budget ändert das nicht.'),
+      h('button', { class: 'btn block', onclick: async () => { await loadDemoCosts(); toast('Beispieldaten geladen.'); } }, icon('table_chart', { size: 18 }), ' Beispieldaten laden'),
+      demoCosts().length ? h('button', { class: 'btn block', onclick: async () => { if (await askConfirm(`${demoCosts().length} Beispiel-Einträge aus den Kosten entfernen?`, 'Entfernen')) { for (const c of demoCosts()) await Store.remove('costs', c.id); toast('Beispieldaten entfernt.'); } } }, icon('delete', { size: 18 }), ` Beispieldaten entfernen (${demoCosts().length})`) : null),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
     card('Startbildschirm', h('label', { class: 'switch-row' }, h('span', {}, 'Startbildschirm beim Öffnen zeigen'), h('input', { type: 'checkbox', role: 'switch', checked: splashOn(), onchange: (e) => setSplash(e.target.checked) })), h('p', { class: 'muted small' }, 'Gilt nur für dieses Gerät. Ein Tipp beendet den Startbildschirm sofort.')),
     docRulesCard(),

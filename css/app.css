@@ -658,3 +658,7 @@ input, select, textarea { font-size: max(16px, 1em); }
 .vtot { font-size: 1.05rem; }
 .vok strong { color: var(--ok-ink, #167a4d); }
 .vbad strong { color: var(--bad-ink); }
+.vopt .vt { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; overflow-wrap: break-word; word-break: normal; }
+.vopt .vtt { font-weight: 550; }
+.vopt .va { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
+.vopt .vd { font-weight: 500; }
