@@ -111,7 +111,7 @@ export async function save(type, data) {
   const prev = records.get(key);
   const rec = {
     key, type, id,
-    data: { ...data, id, updatedAt: Date.now(), updatedBy: userName() },
+    data: { ...data, id, updatedAt: Date.now(), updatedBy: userName(), createdBy: data.createdBy || prev?.data?.createdBy || userName() },
     etag: prev?.etag || null,
     dirty: true,
     deleted: false,

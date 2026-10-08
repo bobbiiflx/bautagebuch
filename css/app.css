@@ -798,3 +798,8 @@ input, select, textarea { font-size: max(16px, 1em); }
 .dr-me { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .dr-me strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .avatar.has-img { background: var(--card); }
+.byline { display: inline-flex; align-items: center; gap: 5px; opacity: .85; }
+.byline .avatar { flex: 0 0 auto; }
+.dd-head .byline { margin-top: 4px; }
+.dc-top { align-items: center; }
+.dc-top .byline { margin-left: auto; margin-right: 8px; }

@@ -567,6 +567,8 @@ function profileBox() {
 const wideQ = matchMedia('(min-width: 960px)');
 wideQ.addEventListener?.('change', () => render());
 
+const authorOf = (d) => { const n = d.createdBy || d.updatedBy || ''; return n && n !== 'Unbekannt' ? n : ''; };
+const byline = (d, size = 20) => { const n = authorOf(d); return n ? h('span', { class: 'byline', title: 'Eingetragen von ' + n }, avatar(n, size), h('span', { class: 'muted small' }, n.split(/\s+/)[0])) : null; };
 function diaryDetail(d, onEdit) {
   const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
   const pc = phaseColor(d.phaseId);
@@ -579,7 +581,7 @@ function diaryDetail(d, onEdit) {
   const doneT = tasks.filter((t) => t.done).length;
   return h('div', { class: 'ddetail', style: { '--pc': pc } },
     h('div', { class: 'dd-head' },
-      h('div', {}, h('h2', {}, d.title), h('div', { class: 'muted small' }, dLong(d.date))),
+      h('div', {}, h('h2', {}, d.title), h('div', { class: 'muted small' }, dLong(d.date)), byline(d, 22)),
       h('button', { type: 'button', class: 'icon-btn small', 'aria-label': 'Eintrag bearbeiten', onclick: onEdit }, icon('edit', { size: 20 }))),
     ph && h('section', { class: 'card gcard' },
       h('div', { class: 'split' }, h('h3', {}, 'Fortschritt'), chip(PHASE_STATES.find((s) => s[0] === ph.state)?.[1] || '', 'phs-' + ph.state)),
@@ -660,7 +662,7 @@ function viewDiary() {
     const who = whoList(d);
     const sel = wide && dv.sel === d.id;
     return h('article', { class: 'card dcard' + (sel ? ' sel' : ''), style: { '--pc': phaseColor(d.phaseId) }, tabindex: 0, onclick: () => { if (wide) set({ sel: d.id }); else openDiaryDetail(d); }, onkeydown: (e) => { if (e.key === 'Enter') e.currentTarget.click(); } },
-      h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dv.group === 'phase' ? dLong(d.date) : null), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
+      h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dv.group === 'phase' ? dLong(d.date) : null), byline(d, 18), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
       h('h3', {}, d.title),
       d.text && h('p', { class: 'clamp' }, d.text),
       h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), [...compList(d), ...who.filter((w) => !companyOf(w))].slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), compList(d).length + who.filter((w) => !companyOf(w)).length > 2 && h('span', { class: 'tchip plain' }, `+${compList(d).length + who.filter((w) => !companyOf(w)).length - 2}`)),
