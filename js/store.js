@@ -496,6 +496,10 @@ export async function importAll(data, blobs = new Map()) {
   return { records: n, files: blobs.size };
 }
 
+// Nur lokal gespeicherte Hilfsdateien (z. B. Markt-Logos): werden nicht synchronisiert und nicht gesichert
+export const putLocalAsset = (key, blob) => idbPut('blobs', blob, 'local/' + key);
+export const getLocalAsset = (key) => idbGet('blobs', 'local/' + key);
+
 // Wo liegt die Datei? 'ok' = in OneDrive, 'pending' = wartet auf Upload, 'local' = OneDrive nicht verbunden
 export function blobStatus(path) {
   if (!remote) return 'local';

@@ -13,6 +13,7 @@ import { DEFAULT_DOC_RULES, suggest } from './docrules.js';
 import * as Wx from './weather.js';
 import { openInk, inkThumb } from './ink.js';
 import { pdfToPng } from './pdfimg.js';
+import { TOP_MARKETS, OTHER_MARKETS, marketByName, logoEl } from './shops.js';
 import { imagesToPdf } from './pdf.js';
 import { gauge, donut, stackBar, stackBars, monthBars, cumLine, legend, short, monthLabel } from './charts.js';
 import * as Fin from './finance.js';
@@ -1093,11 +1094,11 @@ let showDone = false;
 // ---------- Ansicht: Einkauf ----------
 let shopTab = 'offen';
 const SHOP_UNITS = ['x', '×', 'stk', 'stück', 'sack', 'säcke', 'm', 'm²', 'm³', 'kg', 'l', 'pkg', 'pack', 'rolle', 'rollen', 'eimer', 'paar', 'set', 'karton'];
-const SHOP_STORES = ['Hornbach', 'OBI', 'Bauhaus', 'Toom', 'Hagebau', 'Globus Baumarkt', 'Baustoffhandel', 'Elektrogroßhandel'];
 const shopItems = (l) => l.items || [];
 const shopTotal = (l) => sum(shopItems(l), (i) => Number(i.price) || 0);
 const shopDoneN = (l) => shopItems(l).filter((i) => i.done).length;
-const shopStores = () => [...new Set([...Store.all('shopping').map((l) => l.store).filter(Boolean), ...SHOP_STORES])];
+// früher selbst eingetragene Märkte (ohne Logo)
+const customStores = () => [...new Set(Store.all('shopping').map((l) => l.store).filter((n) => n && !marketByName(n)))].sort((x, y) => x.localeCompare(y, 'de'));
 // "3 Sack Zement #Estrichbeton" → Menge "3 Sack", Name "Zement", Detail (Notiz) "Estrichbeton"
 function parseShopLine(text) {
   const [main, ...rest] = text.split('#');
@@ -1125,12 +1126,35 @@ async function shopToggle(id, itemId, on) {
 
 function shopListForm(list) {
   const e = list || { title: '', store: '', phaseId: '', items: [], done: false, created: today() };
-  const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Hornbach Samstag', value: e.title });
-  const store = h('input', { type: 'text', list: 'shop-stores', placeholder: 'Baumarkt / Händler', value: e.store || '' });
-  const dl = h('datalist', { id: 'shop-stores' }, shopStores().map((n) => h('option', { value: n })));
+  const title = h('input', { type: 'text', placeholder: 'z. B. Samstag – leer lassen = Marktname', value: e.title });
+  let store = e.store || '';
+  const known = marketByName(store);
+  // Märkte: Top 3 als Kacheln, weitere im Dropdown, eigener Markt per Eingabe
+  const chips = h('div', { class: 'stchips' }, TOP_MARKETS.map((m) => h('button', { type: 'button', class: 'stchip', 'aria-pressed': 'false', 'data-name': m.name, onclick: () => pick(m.name) },
+    logoEl(m.name, 34), h('span', {}, m.short))));
+  const more = h('select', { 'aria-label': 'Weitere Märkte', onchange: () => { if (more.value === '__own') { own.hidden = false; own.focus(); pick(own.value.trim()); } else if (more.value) { pick(more.value); } } },
+    h('option', { value: '' }, 'Weitere Märkte …'),
+    h('optgroup', { label: 'Märkte' }, OTHER_MARKETS.map((m) => h('option', { value: m.name }, m.name))),
+    customStores().length ? h('optgroup', { label: 'Eigene' }, customStores().map((n) => h('option', { value: n }, n))) : null,
+    h('option', { value: '__own' }, 'Eigener Markt …'));
+  const own = h('input', { type: 'text', placeholder: 'Name des Marktes / Händlers', hidden: true, oninput: () => pick(own.value.trim(), true) });
+  const chosen = h('div', { class: 'stchosen muted small' });
+  function pick(name, fromOwn = false) {
+    store = name;
+    const top = TOP_MARKETS.find((m) => m.name === store);
+    chips.querySelectorAll('.stchip').forEach((c) => { const on = c.dataset.name === store; c.classList.toggle('on', on); c.setAttribute('aria-pressed', String(on)); });
+    if (!fromOwn && more.value !== '__own') more.value = top ? '' : [...more.options].some((o) => o.value === store) ? store : '';
+    if (!fromOwn && !top && store && !OTHER_MARKETS.some((m) => m.name === store) && !customStores().includes(store) && more.value !== '__own') { own.hidden = false; own.value = store; more.value = '__own'; }
+    chosen.replaceChildren(...(store && !fromOwn ? [h('span', {}, 'Gewählt: '), logoEl(store, 18), h('strong', {}, ' ' + store)] : []));
+  }
+  if (store) { const top = TOP_MARKETS.some((m) => m.name === store); if (!top && !known && !customStores().includes(store)) { own.hidden = false; own.value = store; more.value = '__own'; } }
   const phase = usageSelect(e.phaseId);
-  sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [field('Name', title), field('Wo wird eingekauft?', store), dl, field('Gewerk / Verwendung (optional)', phase)], {
-    onSave: () => Store.save('shopping', { ...e, title: title.value.trim(), store: store.value.trim(), phaseId: phase.value }),
+  pick(store, false);
+  sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [
+    field('Wo wird eingekauft?', h('div', { class: 'stpick' }, chips, more, own, chosen)),
+    field('Name des Zettels', title),
+    field('Gewerk / Verwendung (optional)', phase)], {
+    onSave: () => Store.save('shopping', { ...e, title: title.value.trim() || store || 'Einkaufszettel', store, phaseId: phase.value }),
     onDelete: list && (() => Store.remove('shopping', e.id)),
   });
 }
@@ -1196,7 +1220,7 @@ function shopCard(l0) {
     const n = all.length, d = all.filter((i) => i.done).length, tot = sum(all, (i) => Number(i.price) || 0);
     head.replaceChildren(
       h('button', { type: 'button', class: 'shc-t', onclick: () => shopListForm(l) },
-        h('span', { class: 'shc-ic' }, icon('shopping_cart', { size: 22, filled: true })),
+        h('span', { class: 'shc-ic' + (marketByName(l.store) ? ' logo' : '') }, logoEl(l.store, 34) || icon('shopping_cart', { size: 22, filled: true })),
         h('span', { class: 'shc-n' }, h('strong', {}, l.title), l.store ? h('span', { class: 'muted small' }, l.store) : null)),
       cartBox,
       h('span', { class: 'shc-c muted small' }, `${d}/${n}` + (tot ? ` · ca. ${fmtEUR(tot)}` : '')),
@@ -1329,7 +1353,7 @@ function viewShop() {
     const tot = l.costId && Store.get('costs', l.costId) ? Store.get('costs', l.costId).amount : shopTotal(l);
     return h('article', { class: 'card entry', onclick: () => shopDoneDetail(l.id) },
       h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(l.closedAt || l.created)), rec ? chip(`Beleg (${rec})`, 'done') : chip('Beleg fehlt', 'sub-open')),
-      h('div', { class: 'split' }, h('h3', {}, l.title), tot ? h('strong', { class: 'amount' }, (l.costId ? '' : 'ca. ') + fmtEUR(tot)) : null),
+      h('div', { class: 'split' }, h('h3', { class: 'dn-t' }, logoEl(l.store, 22), l.title), tot ? h('strong', { class: 'amount' }, (l.costId ? '' : 'ca. ') + fmtEUR(tot)) : null),
       h('div', { class: 'muted small' }, [l.store, `${shopItems(l).length} Artikel`, l.costId ? 'in Kosten erfasst' : ''].filter(Boolean).join(' · ')));
   };
   return h('div', { class: 'view' }, tabs,
