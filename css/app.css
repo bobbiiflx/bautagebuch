@@ -119,7 +119,7 @@ main { max-width: 720px; margin: 0 auto; padding: 14px 14px calc(var(--tab) + en
 .chip { display: inline-block; padding: 2px 9px; border-radius: 99px; font-size: .74rem; background: var(--line); color: var(--ink); white-space: nowrap; }
 .chip.done, .cs-bezahlt, .ds-behoben, .ds-abgenommen, .phs-fertig { background: var(--chip-done-bg); color: var(--chip-done-fg); }
 .chip.run, .phs-laeuft, .cs-offen, .ds-klaerung { background: var(--chip-run-bg); color: var(--chip-run-fg); }
-.cs-angebot { background: var(--chip-offer-bg); color: var(--chip-offer-fg); }
+.cs-angebot, .cs-budgetangebot { background: var(--chip-offer-bg); color: var(--chip-offer-fg); }
 .ds-offen { background: var(--chip-bad-bg); color: var(--chip-bad-fg); }
 .chip.dim { opacity: .6; }
 .hero .chip.run { background: rgba(124, 147, 255, .22); color: #d6defd; }

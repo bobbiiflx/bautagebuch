@@ -312,8 +312,10 @@ const loanParts = () => Store.all('settings').filter((x) => x.kind === 'loan' &&
 const budgetParts = () => [...manualParts(), ...loanParts()];
 function budgetInfo() { return sum(budgetParts(), (p) => p.amount); }
 // Summen: Ausgaben brutto, Förderungen (ausgezahlt / noch offen), Netto nach ausgezahlter Förderung
+// Angebote (verbindlich) und Budgetangebote (Alternativen zum Durchrechnen) zählen nie als Ausgaben
+const isOffer = (c) => c.status === 'angebot' || c.status === 'budgetangebot';
 function costSums(costs = Store.all('costs')) {
-  const real = costs.filter((c) => c.status !== 'angebot');
+  const real = costs.filter((c) => !isOffer(c));
   const spent = sum(real, (c) => c.amount);
   const subs = real.filter((c) => c.subsidy);
   const subPaid = sum(subs.filter((c) => c.subsidyPaid), (c) => c.subsidyAmount);
@@ -595,7 +597,7 @@ function viewDiary() {
 // ---------- Dokumente an Kosten/Angeboten ----------
 // Abschlagszahlungen: Rechnungen, die mit einem Angebot verknüpft sind und darauf angerechnet werden
 function offerSplit(o) {
-  const ps = Store.all('costs').filter((c) => c.offerId === o.id && c.status !== 'angebot').sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  const ps = Store.all('costs').filter((c) => c.offerId === o.id && !isOffer(c)).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const paid = sum(ps.filter((c) => c.status === 'bezahlt'), (c) => c.amount);
   const inv = sum(ps.filter((c) => c.status === 'offen'), (c) => c.amount);
   return { ps, paid, inv, open: Math.max(0, o.amount - paid), rest: Math.max(0, o.amount - paid - inv), over: paid + inv - o.amount };
@@ -609,7 +611,7 @@ function offerBar(o) {
     sp.inv > 0 && h('div', { class: 'muted small' }, `davon ${fmtEUR(sp.inv)} bereits in Rechnung gestellt`),
     sp.over > 0.005 && h('div', { class: 'viz-warn small' }, icon('warning', { filled: true, size: 16 }), ` Abschläge übersteigen das Angebot um ${fmtEUR(sp.over)}`));
 }
-const costDocCat = (status) => (status === 'angebot' ? 'Angebote' : 'Rechnungen');
+const costDocCat = (status) => (status === 'angebot' || status === 'budgetangebot' ? 'Angebote' : 'Rechnungen');
 const docsOfCost = (c) => (c.docIds || []).map((id) => Store.get('documents', id)).filter(Boolean);
 const costsOfDoc = (d) => Store.all('costs').filter((c) => (c.docIds || []).includes(d.id));
 
@@ -688,7 +690,7 @@ function costForm(entry, preset) {
   const offerSel = h('select', { value: e.offerId || '' }, [h('option', { value: '' }, '– Angebot wählen –'), ...offers.map((o) => h('option', { value: o.id, selected: o.id === e.offerId }, `${o.title}${o.vendor ? ' · ' + o.vendor : ''} · ${fmtEUR(o.amount)}`))]);
   const partBox = h('div', { class: 'subbox' }, field('Angebot', offerSel, 'Der Betrag wird auf dieses Angebot angerechnet: das Angebot zeigt dann einen Teil als bezahlt und den Rest als offen.'));
   const partWrap = h('div', {}, offers.length ? [h('label', { class: 'check' }, isPart, h('span', {}, 'Abschlagszahlung zu einem Angebot')), partBox] : h('p', { class: 'muted small' }, 'Für Abschlagszahlungen zuerst ein Angebot anlegen.'));
-  const syncPart = () => { partWrap.hidden = status.value === 'angebot'; partBox.hidden = !isPart.checked; };
+  const syncPart = () => { partWrap.hidden = status.value === 'angebot' || status.value === 'budgetangebot'; partBox.hidden = !isPart.checked; };
   isPart.addEventListener('change', syncPart); status.addEventListener('change', syncPart); syncPart();
   offerSel.addEventListener('change', () => {
     const o = Store.get('costs', offerSel.value); if (!o) return;
@@ -701,9 +703,9 @@ function costForm(entry, preset) {
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
   const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk / Verwendung', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
-      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, offerId: status.value !== 'angebot' && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
+      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
       // Dokumente mit dem Kosten-Eintrag abgleichen: Kategorie (Angebot/Rechnung) und Gewerk
       for (const d of docsOfCost(saved)) {
@@ -748,7 +750,7 @@ function budgetForm() {
 }
 
 const costFilter = { phase: new Set(), status: new Set() };
-const COST_ICONS = { angebot: 'request_quote', offen: 'receipt_long', bezahlt: 'task_alt' };
+const COST_ICONS = { angebot: 'request_quote', budgetangebot: 'sell', offen: 'receipt_long', bezahlt: 'task_alt' };
 let costTab = 'auswertung';
 
 // Diagramm-Karte mit Umschalter Grafik / Tabelle (für alle, die Zahlen lieber lesen)
@@ -765,7 +767,7 @@ function chartCard(title, chart, legendEl, rows, note) {
 }
 
 function costCharts(all, sums, budget) {
-  const real = all.filter((c) => c.status !== 'angebot');
+  const real = all.filter((c) => !isOffer(c));
   if (!real.length) return h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Sobald Rechnungen eingetragen sind, erscheinen hier die Auswertungen.'));
   const out = [];
 
@@ -845,7 +847,7 @@ function viewCosts() {
       stat('Ausgaben (netto)', fmtEUR(net), budget ? `${fmtEUR(budget - net)} vom Budget übrig` : null, budget && net > budget ? 'bad' : ''),
       stat('Davon offen', fmtEUR(open)),
       stat('Ausgaben brutto', fmtEUR(spent)),
-      stat('Angebote', fmtEUR(offers)),
+      stat('Angebote', fmtEUR(offers), 'ohne Budgetangebote'),
       stat('Förderung ausgezahlt', fmtEUR(subPaid)),
       stat('Förderung ausstehend', fmtEUR(subOpen), subOpen ? 'noch nicht ausgezahlt' : null, subOpen ? 'warn' : '')),
     h('section', { class: 'card budget', onclick: budgetForm },

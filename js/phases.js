@@ -31,6 +31,7 @@ export const DOC_CATEGORIES = ['Verträge', 'Pläne', 'Rechnungen', 'Angebote', 
 
 export const COST_STATES = [
   ['angebot', 'Angebot'],
+  ['budgetangebot', 'Budgetangebot'],
   ['offen', 'Rechnung offen'],
   ['bezahlt', 'Bezahlt'],
 ];
