@@ -1,4 +1,4 @@
-// Märkte für die Einkaufszettel: Top 3 in der Nähe, weitere im Dropdown. Logos werden beim ersten Online-Start geladen,
+// Märkte für die Einkaufszettel: Top 4 (drei Märkte in der Nähe plus Amazon), weitere im Dropdown. Logos werden beim ersten Online-Start geladen,
 // auf 64 px verkleinert und lokal gespeichert (danach offline verfügbar). Eigene Märkte haben kein Logo.
 import { h } from './ui.js';
 import { icon } from './icons.js';
@@ -9,6 +9,7 @@ export const MARKETS = [
   { id: 'globus', name: 'Globus Baumarkt', short: 'Globus', keys: ['globus'], logo: fav('globus-baumarkt.de'), top: true },
   { id: 'toom', name: 'Toom', short: 'Toom', keys: ['toom'], logo: fav('toom.de'), top: true },
   { id: 'schulte', name: 'Schulte Baustoffhandel', short: 'Schulte', keys: ['schulte'], logo: 'https://www.schulte-baustoffe.de/assets/favicon/schulte-baustoffe/ms-icon-144x144.png', top: true },
+  { id: 'amazon', name: 'Amazon', short: 'Amazon', keys: ['amazon'], logo: fav('amazon.de'), top: true },
   { id: 'hornbach', name: 'Hornbach', keys: ['hornbach'], logo: fav('hornbach.de') },
   { id: 'obi', name: 'OBI', keys: ['obi'], logo: fav('obi.de') },
   { id: 'bauhaus', name: 'Bauhaus', keys: ['bauhaus'], logo: fav('bauhaus.info') },

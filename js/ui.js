@@ -1649,7 +1649,7 @@ function shopListForm(list) {
   const title = h('input', { type: 'text', placeholder: 'z. B. Samstag – leer lassen = Marktname', value: e.title });
   let store = e.store || '';
   const known = marketByName(store);
-  // Märkte: Top 3 als Kacheln, weitere im Dropdown, eigener Markt per Eingabe
+  // Märkte: Top 4 als Kacheln, weitere im Dropdown, eigener Markt per Eingabe
   const chips = h('div', { class: 'stchips' }, TOP_MARKETS.map((m) => h('button', { type: 'button', class: 'stchip', 'aria-pressed': 'false', 'data-name': m.name, onclick: () => pick(m.name) },
     logoEl(m.name, 34), h('span', {}, m.short))));
   const more = h('select', { 'aria-label': 'Weitere Märkte', onchange: () => { if (more.value === '__own') { own.hidden = false; own.focus(); pick(own.value.trim()); } else if (more.value) { pick(more.value); } } },
