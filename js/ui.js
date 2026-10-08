@@ -51,6 +51,18 @@ const byDateDesc = (a, b) => (b.date || '').localeCompare(a.date || '') || (b.up
 
 export const phases = () => Store.all('phases').sort((a, b) => a.order - b.order);
 const phaseById = (id) => Store.get('phases', id);
+// Dezimalfeld: auf dem iPhone verträgt type=number das Komma nicht zuverlässig. Daher Textfeld mit
+// Dezimaltastatur; .value liefert immer einen Punkt-Wert ("1.500,5" -> "1500.5"), angezeigt wird mit Komma.
+function dec(props) {
+  const el = h('input', { ...props, type: 'text', inputmode: 'decimal', autocomplete: 'off', autocorrect: 'off' });
+  const d = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  const norm = (v) => { v = String(v ?? '').trim().replace(/\s/g, ''); if (v.includes(',')) v = v.replace(/\./g, '').replace(',', '.'); return v; };
+  Object.defineProperty(el, 'value', { get() { return norm(d.get.call(el)); }, set(v) { d.set.call(el, v === '' || v == null ? '' : String(v).replace('.', ',')); }, configurable: true });
+  el.value = d.get.call(el);
+  el.addEventListener('input', () => { const t = d.get.call(el), c = t.replace(/[^0-9.,]/g, ''); if (c !== t) d.set.call(el, c); });
+  return el;
+}
+
 const customTrades = () => Store.get('settings', 'trades')?.list || [];
 const tradeOptions = () => [...BUILTIN_TRADES.map(([id, name]) => ({ id, name })), ...customTrades()];
 const usageById = (id) => phaseById(id) || tradeOptions().find((t) => t.id === id);
@@ -644,12 +656,12 @@ function costForm(entry) {
   const e = entry || { date: today(), title: '', amount: '', vendor: '', phaseId: '', status: 'offen', note: '', photos: [] };
   const date = h('input', { type: 'date', required: true, value: e.date });
   const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Rechnung Elektro, Abschlag 1', value: e.title });
-  const amount = h('input', { type: 'number', required: true, step: '0.01', min: '0', inputmode: 'decimal', value: e.amount });
+  const amount = dec({ required: true, step: '0.01', min: '0', inputmode: 'decimal', value: e.amount });
   const vendor = h('input', { type: 'text', placeholder: 'Firma', value: e.vendor || '' });
   const phase = usageSelect(e.phaseId);
   const status = h('select', { value: e.status }, optionList(COST_STATES, e.status));
   const subOn = h('input', { type: 'checkbox', checked: !!e.subsidy });
-  const subAmt = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Förderbetrag (EUR)', value: e.subsidyAmount ?? '' });
+  const subAmt = dec({ step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'Förderbetrag (EUR)', value: e.subsidyAmount ?? '' });
   const subPaid = h('input', { type: 'checkbox', checked: !!e.subsidyPaid });
   const subBox = h('div', { class: 'subbox' }, field('Förderbetrag (EUR)', subAmt, 'Der Teil dieser Rechnung, der gefördert wird bzw. erstattet wird.'), h('label', { class: 'check' }, subPaid, h('span', {}, 'Förderung bereits ausgezahlt')));
   subBox.hidden = !subOn.checked;
@@ -682,7 +694,7 @@ function budgetForm() {
   const upd = () => { total.textContent = fmtEUR(sum([...rows.querySelectorAll('.prow')], (r) => r.querySelector('.pamt').value)); };
   const addRow = (p = {}) => {
     const name = h('input', { type: 'text', list: 'budget-names', placeholder: 'z. B. Eigenkapital', value: p.name || '', 'aria-label': 'Bezeichnung' });
-    const amt = h('input', { type: 'number', class: 'pamt', step: '100', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: p.amount ?? '', 'aria-label': 'Betrag', oninput: upd });
+    const amt = dec({ class: 'pamt', step: '100', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: p.amount ?? '', 'aria-label': 'Betrag', oninput: upd });
     const row = h('div', { class: 'prow', 'data-id': p.id || 'p' + Date.now().toString(36) + Math.floor(Math.random() * 99) }, name, amt, h('button', { type: 'button', class: 'mv', 'aria-label': 'Teil entfernen', onclick: () => { row.remove(); upd(); } }, '×'));
     rows.append(row);
   };
@@ -881,7 +893,7 @@ function ymRows(list, ph) {
   const box = h('div', { class: 'brows' });
   const add = (r = {}) => {
     const ym = h('input', { type: 'month', value: r.ym || '', 'aria-label': 'Monat' });
-    const amt = h('input', { type: 'number', class: 'pamt', step: '500', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: r.amount ?? '', 'aria-label': 'Betrag' });
+    const amt = dec({ class: 'pamt', step: '500', min: '0', inputmode: 'decimal', placeholder: 'EUR', value: r.amount ?? '', 'aria-label': 'Betrag' });
     const row = h('div', { class: 'prow ymrow' }, ym, amt, h('button', { type: 'button', class: 'mv', 'aria-label': 'Entfernen', onclick: () => row.remove() }, icon('close', { size: 18 })));
     box.append(row);
   };
@@ -891,7 +903,7 @@ function ymRows(list, ph) {
 
 function loanForm(entry) {
   const e = { ...LOAN_DEFAULT, ...(entry || {}), kind: 'loan' };
-  const num = (v, o = {}) => h('input', { type: 'number', inputmode: 'decimal', step: o.step || '0.01', min: o.min ?? '0', value: v ?? '', placeholder: o.ph || '' });
+  const num = (v, o = {}) => dec({ inputmode: 'decimal', step: o.step || '0.01', min: o.min ?? '0', value: v ?? '', placeholder: o.ph || '' });
   const name = h('input', { type: 'text', required: true, value: e.name, placeholder: 'z. B. Bankdarlehen, KfW, Familie', list: 'loan-names' });
   const dl = h('datalist', { id: 'loan-names' }, ['Bankdarlehen', 'KfW-Darlehen', 'Bausparvertrag', 'Darlehen Familie'].map((n) => h('option', { value: n })));
   const amount = num(e.amount, { step: '1000', ph: 'EUR' });
@@ -1226,7 +1238,7 @@ function shopItemForm(listId, item) {
   const name = h('input', { type: 'text', required: true, value: it.name });
   const qty = h('input', { type: 'text', placeholder: 'z. B. 3 Sack, 12 m', value: it.qty || '' });
   const note = h('textarea', { rows: 3, placeholder: 'Marke, Maße, Artikelnummer, Regal …', value: it.note || '' });
-  const price = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'optional', value: it.price ?? '' });
+  const price = dec({ step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'optional', value: it.price ?? '' });
   const phase = usageSelect(it.phaseId);
   const pf = photoField(it.photos || []);
   sheet(item ? 'Produkt' : 'Neues Produkt', [field('Produkt', name), field('Menge', qty), field('Preis (EUR)', price), field('Notiz', note), field('Gewerk / Verwendung', phase), pf.el], {
@@ -1370,7 +1382,7 @@ function shopDoneDetail(id) {
       if (c) await Store.save('costs', { ...c, docIds: [...new Set([...(c.docIds || []), ...ids])] });
       paint();
     });
-    const amtIn = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', value: amt, placeholder: 'laut Beleg', oninput: (e) => { amt = e.target.value; } });
+    const amtIn = dec({ step: '0.01', min: '0', inputmode: 'decimal', value: amt, placeholder: 'laut Beleg', oninput: (e) => { amt = e.target.value; } });
     body.replaceChildren(
       h('p', { class: 'muted small' }, [l.store, l.closedAt ? 'abgeschlossen ' + fmtDate(l.closedAt) : ''].filter(Boolean).join(' · ')),
       h('section', { class: 'card' }, h('h3', {}, shopDoneN(l) < shopItems(l).length ? `Artikel (${shopDoneN(l)} von ${shopItems(l).length} gekauft)` : `Artikel (${shopItems(l).length})`),
