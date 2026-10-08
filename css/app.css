@@ -805,3 +805,10 @@ input, select, textarea { font-size: max(16px, 1em); }
 .dc-top .byline { margin-left: auto; margin-right: 8px; }
 .dc-top .byline { margin: 0; }
 .dc-r { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
+
+/* Wischen zum Löschen */
+.sw { position: relative; overflow: hidden; border-radius: var(--radius, 16px); touch-action: pan-y; }
+.sw > :last-child { position: relative; z-index: 1; touch-action: pan-y; will-change: transform; }
+.sw-del { position: absolute; top: 0; right: 0; bottom: 0; width: 92px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--bad); color: #fff; border: 0; font-size: 12px; font-weight: 600; }
+.sw > .todo, .sw > .doc { background: var(--card); }
+.card > .sw, .ph-todo-list > .sw { border-radius: 0; }

@@ -506,6 +506,65 @@ function phaseColor(id) {
   const k = i >= 0 ? i : [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
   return `hsl(${HUES[k % HUES.length]} 62% 52%)`;
 }
+// ---------- Wischen nach links: Löschen ----------
+let swipeOpen = null;
+const resetSwipe = (w) => { w.classList.remove('open'); const c = w.lastChild; c.style.transition = 'transform .2s ease'; c.style.transform = ''; };
+const closeSwipe = () => { if (swipeOpen) { resetSwipe(swipeOpen); swipeOpen = null; } };
+function swipeDel(card, doDelete, label = 'Löschen') {
+  const W = 92;
+  const act = h('button', { type: 'button', class: 'sw-del', 'aria-label': label }, icon('delete', { size: 24 }), h('span', {}, label));
+  const wrap = h('div', { class: 'sw' }, act, card);
+  let x0 = 0, y0 = 0, dx = 0, mode = '', base = 0, moved = false, pid = null;
+  const setX = (v, anim) => { card.style.transition = anim ? 'transform .2s ease' : 'none'; card.style.transform = v ? `translateX(${v}px)` : ''; };
+  wrap.addEventListener('pointerdown', (e) => {
+    if ((e.pointerType === 'mouse' && !window.__swMouse) || e.target.closest('input,textarea,select')) return;
+    x0 = e.clientX; y0 = e.clientY; dx = 0; mode = ''; moved = false; pid = e.pointerId;
+    base = wrap.classList.contains('open') ? -W : 0;
+    if (swipeOpen && swipeOpen !== wrap) closeSwipe();
+  });
+  wrap.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== pid || mode === 'v') return;
+    const mx = e.clientX - x0, my = e.clientY - y0;
+    if (!mode) {
+      if (Math.abs(my) > 8 && Math.abs(my) > Math.abs(mx)) { mode = 'v'; return; }
+      if (Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my) * 1.5) { mode = 'h'; try { wrap.setPointerCapture(pid); } catch {} } else return;
+    }
+    moved = true;
+    dx = Math.max(-W - 24, Math.min(0, base + mx));
+    setX(dx, false);
+  });
+  const end = (e) => {
+    if (e.pointerId !== pid) return;
+    pid = null;
+    if (mode !== 'h') return;
+    const open = dx < -W * 0.5;
+    setX(open ? -W : 0, true);
+    wrap.classList.toggle('open', open);
+    swipeOpen = open ? wrap : (swipeOpen === wrap ? null : swipeOpen);
+  };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
+  // Nach einer Wischgeste oder bei geöffneter Zeile kein Antippen der Karte
+  card.addEventListener('click', (e) => {
+    if (moved || wrap.classList.contains('open')) {
+      e.stopPropagation(); e.preventDefault();
+      if (!moved) { resetSwipe(wrap); swipeOpen = null; }
+      moved = false;
+    }
+  }, true);
+  act.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (await askConfirm('Wirklich löschen?', 'Löschen')) { try { await doDelete(); } catch { toast('Löschen fehlgeschlagen.'); } }
+    else { resetSwipe(wrap); swipeOpen = null; }
+  });
+  return wrap;
+}
+async function deleteTodo(t) {
+  for (const x of successors(t)) await Store.save('todos', { ...x, after: (x.after || []).filter((id) => id !== t.id) });
+  await Store.remove('todos', t.id);
+  await syncPhase(t.phaseId);
+}
+
 const compList = (d) => [...new Map([...(d.companies || []), ...whoList(d).filter((w) => companyOf(w))].map((n) => [norm(n), companyOf(n)?.name || n])).values()];
 const whoList = (d) => String(d.who || '').split(/\s*(?:,|;| und | & )\s*/).map((x) => x.trim()).filter(Boolean);
 const initials = (n) => n.split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
@@ -664,7 +723,8 @@ function viewDiary() {
     { title: 'Person', key: 'fwho', items: whoAll.map((w) => ({ v: w, t: w, icon: icon('groups', { size: 22 }) })) },
   ], h('button', { type: 'button', class: 'pill small fpill' + (dv.group === 'phase' ? ' on' : ''), 'aria-pressed': String(dv.group === 'phase'), onclick: () => set({ group: dv.group === 'phase' ? 'day' : 'phase' }) }, icon('layers', { size: 18 }), ' Nach Gewerk'));
 
-  const card = (d) => {
+  const card = (d) => swipeDel(cardBody(d), () => Store.remove('diary', d.id));
+  const cardBody = (d) => {
     const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
     const who = whoList(d);
     const sel = wide && dv.sel === d.id;
@@ -1197,7 +1257,7 @@ function viewCosts() {
     fBar,
     list.length
       ? list.map((c) =>
-          h(
+          swipeDel(h(
             'article',
             { class: 'card entry', onclick: () => costForm(c) },
             h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(c.date)), chip(COST_STATES.find((s) => s[0] === c.status)?.[1] || c.status, 'cs-' + c.status)),
@@ -1210,7 +1270,7 @@ function viewCosts() {
             c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
             docsOfCost(c).length ? h('div', { class: 'att-chips' }, docsOfCost(c).map((d) => h('button', { type: 'button', class: 'tchip plain attc', onclick: (ev) => { ev.stopPropagation(); openDoc(d); } }, icon('attach_file', { size: 14 }), ' ' + d.name))) : null,
             photoStrip(c.photos)
-          )
+          ), () => Store.remove('costs', c.id))
         )
       : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.', 'payments'),
   ];
@@ -1432,7 +1492,7 @@ function viewDefects() {
     ]),
     list.length
       ? list.map((d) =>
-          h(
+          swipeDel(h(
             'article',
             { class: 'card entry', onclick: () => defectForm(d) },
             h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(d.date)), chip(DEFECT_STATES.find((s) => s[0] === d.status)?.[1] || d.status, 'ds-' + d.status)),
@@ -1440,7 +1500,7 @@ function viewDefects() {
             h('div', { class: 'muted small' }, [d.room, d.vendor, d.due && 'Frist ' + fmtDate(d.due)].filter(Boolean).join(' · ')),
             d.description && h('p', { class: 'clamp' }, d.description),
             photoStrip(d.photos)
-          )
+          ), () => Store.remove('defects', d.id))
         )
       : empty('Keine Mängel in dieser Ansicht', 'Halte Mängel mit Foto, Ort und Frist fest, bevor Handwerker abziehen.', 'warning'),
     fab(() => defectForm())
@@ -1508,7 +1568,8 @@ function todoForm(entry, presetPhase = '') {
 }
 
 // Eine Aufgabenzeile (Aufgaben- und Planungsansicht)
-function todoRow(t, withPhase = true) {
+const todoRow = (t, withPhase = true) => swipeDel(todoRowBody(t, withPhase), () => deleteTodo(t));
+function todoRowBody(t, withPhase = true) {
   const wait = blockedBy(t);
   const nSucc = t.done ? 0 : successors(t).filter((x) => !x.done).length;
   const late = !t.done && t.due && preds(t).some((p) => !p.done && p.due && p.due > t.due);
@@ -2305,7 +2366,8 @@ function viewDocs() {
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
   const tagIds = [...new Set(all.flatMap((d) => d.tags || []))].sort((a, b) => a.localeCompare(b, 'de'));
   const vendorNames = [...new Map(all.filter((d) => d.vendor).map((d) => [norm(d.vendor), d.vendor])).values()].sort((a, b) => a.localeCompare(b, 'de'));
-  const row = (d) => {
+  const row = (d) => (d.virtual ? rowBody(d) : swipeDel(rowBody(d), () => Store.remove('documents', d.id)));
+  const rowBody = (d) => {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
       d.vendor && !(d.tags || []).some((t) => norm(t) === norm(d.vendor)) ? h('span', { class: 'tchip plain' }, d.vendor) : null,
