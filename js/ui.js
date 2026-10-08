@@ -1544,7 +1544,23 @@ function dependsOn(a, b, seen = new Set()) {
 async function toggleTodo(t, done) {
   const wait = done ? openPreds(t) : [];
   if (wait.length && !confirm(`Noch offen: ${wait.map((p) => p.title).join(', ')}.\n\nTrotzdem als erledigt markieren?`)) { render(); return; }
+  const el = done && document.querySelector(`.todo[data-id="${t.id}"]`);
+  if (el) { el.querySelector('.todo-chk')?.replaceChildren(icon('check', { size: 20 })); el.classList.add('todo-pop'); await new Promise((r) => setTimeout(r, 420)); }
   await saveTodo({ ...t, done }, t.phaseId);
+  if (done && t.phaseId) {
+    const rest = Store.all('todos').filter((x) => x.phaseId === t.phaseId);
+    if (rest.length >= 2 && rest.every((x) => x.done)) confetti();
+  }
+}
+function confetti() {
+  const cols = ['#3b5bdb', '#1f9d63', '#f59f00', '#e8590c', '#d6336c', '#7048e8'];
+  const box = h('div', { class: 'confetti', 'aria-hidden': 'true' });
+  for (let i = 0; i < 34; i++) {
+    const a = (Math.PI * 2 * i) / 34 + Math.random() * 0.5, d = 90 + Math.random() * 150;
+    box.append(h('i', { style: { background: cols[i % cols.length], '--dx': Math.cos(a) * d + 'px', '--dy': Math.sin(a) * d - 60 + 'px', '--r': Math.round(Math.random() * 720 - 360) + 'deg', animationDelay: Math.random() * 0.12 + 's' } }));
+  }
+  document.body.append(box);
+  setTimeout(() => box.remove(), 1500);
 }
 
 function todoForm(entry, presetPhase = '') {
@@ -1580,13 +1596,16 @@ function todoRowBody(t, withPhase = true) {
   const late = !t.done && t.due && preds(t).some((p) => !p.done && p.due && p.due > t.due);
   return h(
     'div',
-    { class: 'todo' + (t.done ? ' done' : '') + (wait.length ? ' blocked' : ''), role: 'button', tabindex: 0, 'aria-pressed': String(!!t.done), onclick: () => toggleTodo(t, !t.done), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTodo(t, !t.done); } } },
+    { class: 'todo' + (t.done ? ' done' : '') + (wait.length ? ' blocked' : ''), 'data-id': t.id, style: { '--pc': phaseColor(t.phaseId) }, role: 'button', tabindex: 0, 'aria-pressed': String(!!t.done), onclick: () => toggleTodo(t, !t.done), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTodo(t, !t.done); } } },
     h('span', { class: 'todo-chk' }, t.done ? icon('check', { size: 20 }) : null),
     h(
       'div',
       { class: 'todo-t' },
       h('div', {}, t.title),
-      h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? 'überfällig · ' : '') + fmtDate(t.due), t.assignee, withPhase && phaseName(t.phaseId)].filter(Boolean).join(' · ')),
+      h('div', { class: 'todo-meta' },
+        t.due ? (() => { const k = dueKey(t); return k === 'late' ? chip('Überfällig ' + fmtDate(t.due), 'ds-offen') : k === 'today' ? chip('Heute', 'warn') : k === 'week' ? chip(fmtDate(t.due), 'warn') : h('span', { class: 'muted small' }, fmtDate(t.due)); })() : null,
+        (withPhase && phaseName(t.phaseId)) ? h('span', { class: 'muted small' }, phaseName(t.phaseId)) : null,
+        t.assignee ? h('span', { class: 'muted small' }, 'für ' + t.assignee.split(/\s+/)[0]) : null),
       wait.length || nSucc || late
         ? h(
             'div',
@@ -1597,6 +1616,7 @@ function todoRowBody(t, withPhase = true) {
           )
         : null
     ),
+    todoWho(t),
     h('button', { type: 'button', class: 'icon-btn small', 'aria-label': 'Bearbeiten', onclick: (e) => { e.stopPropagation(); todoForm(t); } }, icon('edit', { size: 20 }))
   );
 }
@@ -1885,15 +1905,59 @@ function viewShop() {
     shopTab === 'offen' ? fab(() => shopListForm()) : null);
 }
 
+const todoF = { phase: new Set(), who: new Set(), due: new Set() };
+let todoGroup = false;
+const DUE_LABELS = { late: 'Überfällig', today: 'Heute', week: 'Diese Woche', later: 'Später', none: 'Ohne Datum' };
+function dueKey(t) {
+  if (!t.due) return 'none';
+  const n = today();
+  if (t.due < n) return 'late';
+  if (t.due === n) return 'today';
+  return t.due <= addDays(n, 7) ? 'week' : 'later';
+}
+const todoOwner = (t) => t.assignee || authorOf(t) || '';
+function todoWho(t) {
+  const n = todoOwner(t);
+  if (!n) return null;
+  return h('span', { class: 'todo-who' + (t.assignee ? '' : ' dim'), title: (t.assignee ? 'Zuständig: ' : 'Erstellt von ') + n }, avatar(n, 24));
+}
 function viewTodos() {
   const all = Store.all('todos');
-  const open = all.filter((t) => !t.done).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
-  const done = all.filter((t) => t.done).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const t0 = today();
+  const openAll = all.filter((t) => !t.done);
+  const pct = all.length ? Math.round((all.filter((t) => t.done).length / all.length) * 100) : 0;
+  const match = (t) => (!todoF.phase.size || todoF.phase.has(t.phaseId || '')) && (!todoF.who.size || [...todoF.who].some((w) => norm(w) === norm(todoOwner(t)))) && (!todoF.due.size || todoF.due.has(dueKey(t)));
+  const byDue = (a, b) => (a.due || '9999').localeCompare(b.due || '9999');
+  const open = openAll.filter(match).sort(byDue);
+  const done = all.filter((t) => t.done && match(t)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  const cnt = (k) => openAll.filter((t) => dueKey(t) === k).length;
+  const tile = (k, label, cls) => h('button', { type: 'button', class: 'tdt ' + cls + (todoF.due.has(k) ? ' on' : ''), 'aria-pressed': String(todoF.due.has(k)), onclick: () => { const on = todoF.due.has(k); todoF.due.clear(); if (!on) todoF.due.add(k); render(); } }, h('strong', {}, String(cnt(k))), h('span', {}, label));
+  const head = h('section', { class: 'card tdh' },
+    h('div', { class: 'tdh-g' }, gauge(pct, 'var(--ok, #1f9d63)', 'erledigt'), h('div', { class: 'muted small center' }, `${all.filter((t) => t.done).length} von ${all.length} erledigt`)),
+    h('div', { class: 'tdh-t' }, tile('late', 'überfällig', 'bad'), tile('today', 'heute', 'warn'), tile('week', 'diese Woche', '')));
+  const phaseItems = [...new Set(all.map((t) => t.phaseId || ''))].map((id) => ({ v: id, t: id ? phaseName(id) : 'Ohne Gewerk', icon: id ? phaseIcon({ id }, { size: 22 }) : icon('task_alt', { size: 22 }) }));
+  const names = [...new Map(all.map(todoOwner).filter(Boolean).map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b, 'de'));
+  const me = myName();
+  const fbar = filterBar(todoF, [
+    { title: 'Gewerk', key: 'phase', items: phaseItems },
+    { title: 'Zuständig / erstellt von', key: 'who', items: names.map((n) => ({ v: n, t: n, icon: avatar(n, 22) })) },
+    { title: 'Fälligkeit', key: 'due', items: Object.entries(DUE_LABELS).map(([v, t]) => ({ v, t, icon: icon('today', { size: 22 }) })) },
+  ],
+    me ? h('button', { type: 'button', class: 'pill small fpill' + (todoF.who.size === 1 && norm([...todoF.who][0]) === norm(me) ? ' on' : ''), onclick: () => { const on = todoF.who.size === 1 && norm([...todoF.who][0]) === norm(me); todoF.who.clear(); if (!on) todoF.who.add(me); render(); } }, avatar(me, 18), ' Meine') : null,
+    h('button', { type: 'button', class: 'pill small fpill' + (todoGroup ? ' on' : ''), 'aria-pressed': String(todoGroup), onclick: () => { todoGroup = !todoGroup; render(); } }, icon('layers', { size: 18 }), ' Nach Gewerk'));
+  const free = open.filter((t) => !blockedBy(t).length), blocked = open.filter((t) => blockedBy(t).length);
+  const groups = (list) => {
+    if (!todoGroup) return [h('div', { class: 'card' }, list.map((t) => todoRow(t)))];
+    const m = new Map();
+    list.forEach((t) => { const k = t.phaseId || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(t); });
+    return [...m.entries()].map(([k, l]) => h('div', { class: 'card' }, h('div', { class: 'sub' }, k ? phaseIcon({ id: k }, { size: 16 }) : null, ' ' + (k ? phaseName(k) : 'Ohne Gewerk')), l.map((t) => todoRow(t, false))));
+  };
   return h(
     'div',
     { class: 'view' },
-    open.length ? h('div', { class: 'card' }, open.filter((t) => !blockedBy(t).length).map((t) => todoRow(t))) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.', 'task_alt'),
-    open.some((t) => blockedBy(t).length) ? h('div', { class: 'card' }, h('div', { class: 'sub' }, icon('lock', { size: 16 }), ' Wartet auf Vorgänger'), open.filter((t) => blockedBy(t).length).map((t) => todoRow(t))) : null,
+    head, fbar,
+    free.length ? groups(free) : (openAll.length ? empty('Nichts gefunden', 'Mit diesen Filtern gibt es keine offenen Aufgaben.', 'task_alt') : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.', 'task_alt')),
+    blocked.length ? h('div', { class: 'card' }, h('div', { class: 'sub' }, icon('lock', { size: 16 }), ' Wartet auf Vorgänger'), blocked.map((t) => todoRow(t))) : null,
     done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, icon(showDone ? 'expand_less' : 'expand_more', { size: 20 }), ` Erledigt (${done.length})`) : null,
     showDone && done.length ? h('div', { class: 'card' }, done.map((t) => todoRow(t))) : null,
     fab(() => todoForm())

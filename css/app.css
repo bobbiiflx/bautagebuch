@@ -819,3 +819,30 @@ input, select, textarea { font-size: max(16px, 1em); }
 .sw > .sw-del, .sw > .sw-act { visibility: hidden; }
 .sw.drag > .sw-del, .sw.drag > .sw-act, .sw.open > .sw-del { visibility: visible; }
 .sw > :last-child { background-clip: padding-box; }
+
+/* Aufgaben */
+.tdh { display: grid; grid-template-columns: 138px 1fr; gap: 12px; align-items: center; }
+.tdh .gauge-box { width: 100%; }
+.tdh-t { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.tdt { display: flex; align-items: baseline; gap: 8px; text-align: left; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); color: inherit; font: inherit; }
+.tdt strong { font-size: 1.25rem; min-width: 1.4em; }
+.tdt span { font-size: .85rem; color: var(--muted); }
+.tdt.bad strong { color: var(--bad); }
+.tdt.warn strong { color: var(--warn-ink, #8a5a0b); }
+.tdt.on { border-color: var(--accent); background: var(--accent-soft, rgba(59,91,219,.1)); }
+.todo { border-left: 3px solid var(--pc, transparent); padding-left: 10px; margin-left: -4px; }
+.todo-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; margin-top: 2px; }
+.todo-who { flex: none; display: inline-flex; }
+.todo-who.dim { opacity: .55; }
+.todo-chk { border: 2px solid var(--line); border-radius: 99px; transition: background .2s, border-color .2s; }
+.todo.done .todo-chk, .todo.todo-pop .todo-chk { background: var(--ok, #1f9d63); border-color: var(--ok, #1f9d63); color: #fff; }
+.todo.todo-pop .todo-chk { animation: tdpop .42s cubic-bezier(.3, 1.6, .5, 1); }
+.todo.todo-pop .todo-t > div:first-child { text-decoration: line-through; opacity: .55; transition: opacity .3s; }
+.todo.todo-pop { animation: tdfade .42s ease .05s forwards; }
+@keyframes tdpop { 0% { transform: scale(.7); } 55% { transform: scale(1.35); } 100% { transform: scale(1); } }
+@keyframes tdfade { 0% { background: transparent; } 40% { background: color-mix(in srgb, var(--ok, #1f9d63) 14%, transparent); } 100% { background: transparent; } }
+.confetti { position: fixed; left: 50%; top: 42%; width: 0; height: 0; z-index: 3000; pointer-events: none; }
+.confetti i { position: absolute; width: 9px; height: 14px; border-radius: 2px; opacity: 0; animation: cfly 1.2s cubic-bezier(.2, .7, .3, 1) forwards; }
+@keyframes cfly { 0% { opacity: 1; transform: translate(0, 0) rotate(0); } 70% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 120px)) rotate(var(--r)); } }
+@media (prefers-reduced-motion: reduce) { .confetti { display: none; } .todo.todo-pop, .todo.todo-pop .todo-chk { animation: none; } }
+.sw > .todo { margin-left: 0; padding-left: 12px; }
