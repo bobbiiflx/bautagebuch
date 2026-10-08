@@ -224,28 +224,6 @@ export function makeMixerTruck() {
   return g;
 }
 
-// Pkw (Limousine) in beliebiger Farbe
-export function makeCar(color = 0xe0553f, roof = null) {
-  const g = grp('auto');
-  const pts = [[-2.05, 0.4], [-2.05, 1.0], [-1.55, 1.08], [-0.85, 1.62], [0.45, 1.62], [1.05, 1.1], [2.0, 1.0], [2.1, 0.7], [2.1, 0.4]];
-  g.add(prof(pts, 1.8, color, { shadow: true }));
-  g.add(bx(1.3, 0.05, 1.7, roof ?? color).at(-0.2, 1.64, 0));
-  g.add(bx(0.06, 0.52, 1.6, 0x28384f, { outline: false }).at(0.95, 1.35, 0).rotate(0, 0, 0.9));
-  streaks(g, 0.97, 1.35, 1.5, 0.5, 0.9);
-  g.add(bx(0.06, 0.45, 1.5, 0x28384f, { outline: false }).at(-1.18, 1.37, 0).rotate(0, 0, -0.95));
-  for (const z of [-0.91, 0.91]) g.add(bx(1.6, 0.42, 0.05, 0x28384f, { outline: false }).at(-0.15, 1.38, z), bx(0.05, 0.4, 0.3, 0x28384f, { outline: false }).at(-0.15, 1.38, z * 1.0));
-  lamp(g, 2.1, 0.8, 0.6, 1, 0xfff0a0); lamp(g, 2.1, 0.8, -0.6, 1, 0xfff0a0);
-  g.add(bx(0.12, 0.2, 0.3, 0xe0302a, { emissive: 0.4, outline: false }).at(-2.06, 0.82, 0.65), bx(0.12, 0.2, 0.3, 0xe0302a, { emissive: 0.4, outline: false }).at(-2.06, 0.82, -0.65));
-  g.add(bx(0.3, 0.22, 1.9, 0xc7ced4).at(2.1, 0.52, 0), bx(0.3, 0.22, 1.9, 0xc7ced4).at(-2.05, 0.52, 0));
-  g.add(bx(0.04, 0.3, 0.9, 0x31353b).at(2.12, 0.72, 0));
-  plate(g, 2.2, 0.52); plate(g, -2.2, 0.52, true);
-  for (const z of [-1.0, 1.0]) g.add(bx(0.14, 0.12, 0.2, color).at(0.9, 1.15, z * 1.05));
-  const wh = [];
-  for (const x of [1.3, -1.3]) for (const z of [-0.9, 0.9]) { const w = wheel(0.4, 0.3).at(x, 0.4, z); g.add(w); wh.push(w); }
-  g.wheels = wh;
-  return g;
-}
-
 // Handwerker-Transporter
 export function makeVan(color = 0xf4f1ea, stripe = 0x2f7be0) {
   const g = grp('transporter');
@@ -281,7 +259,6 @@ export function makePanel() {
   g.add(bx(1.58, 0.1, 0.015, 0xa9bbe0, { outline: false }));
   return g;
 }
-export const makeCone = () => { const g = grp('hütchen'); g.add(bx(0.4, 0.05, 0.4, 0x2b2e34), cy(0.04, 0.17, 0.55, 0xff7a1f, 8).at(0, 0.32, 0), cy(0.1, 0.12, 0.08, 0xffffff, 8).at(0, 0.3, 0)); return g; };
 export const makeTorch = () => { const g = grp('brenner'); g.add(cy(0.03, 0.03, 0.55, 0x8c949c, 6).rotate(0, 0, Math.PI / 2).at(0.25, 0, 0), bx(0.12, 0.1, 0.07, 0xe0553f).at(0.0, 0, 0), sp(0.045, 0x9fd8ff, { emissive: 1, unlit: true }).at(0.55, 0, 0)); return g; };
 export const makeBin = (c = 0x6f7a84) => { const g = grp('tonne'); g.add(fr(0.55, 0.65, 0.65, 0.75, 0.95, c).at(0, 0.48, 0), bx(0.7, 0.08, 0.8, c === 0x6f7a84 ? 0x4a5058 : c).at(0, 1.0, 0)); g.add(cy(0.09, 0.09, 0.06, 0x2b2e34, 8).rotate(Math.PI / 2, 0, 0).at(-0.1, 0.3, 0.38)); return g; };
 

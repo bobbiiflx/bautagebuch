@@ -439,7 +439,7 @@ export function exportAll() {
 // Beispieldaten zum Ausprobieren (mit demo:true markiert, damit sie sich sauber entfernen lassen).
 export async function loadDemo() {
   const today = new Date();
-  const d = (n) => new Date(today.getTime() - n * 864e5).toISOString().slice(0, 10);
+  const d = (n) => new Date(today.getTime() - n * 864e5).toLocaleDateString('sv-SE');
   const demo = { demo: true };
   await save('diary', { ...demo, date: d(2), title: 'Container gestellt', text: 'Der 10-m³-Container steht vor dem Haus. Entkernung im Keller beginnt morgen.', phaseId: 'entkernung', companies: ['Abbruch Becker'], photos: [] });
   await save('diary', { ...demo, date: d(5), title: 'Öltank leergepumpt', text: 'Tank wurde fachgerecht entleert, Entsorgungsnachweis liegt bei.', phaseId: 'oeltank', companies: ['Entsorgung Nord'], photos: [] });

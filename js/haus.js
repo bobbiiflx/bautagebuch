@@ -38,7 +38,6 @@ const box = (w, h, d, c, o = {}) => new Node(boxGeo(w, h, d), { color: hex(c), .
 const grp = (name) => new Node(null, { name });
 const cylN = (rt, rb, h, c, seg = 8, o = {}) => new Node(G.cyl(rt, rb, h, seg), { color: hex(c), ...o });
 const setCol = (n, c) => { n.color = Array.isArray(c) ? c : hex(c); };
-const mixC = (a, b, t) => { const A = hex(a), B = hex(b); return [lerp(A[0], B[0], t), lerp(A[1], B[1], t), lerp(A[2], B[2], t)]; };
 
 // Polygon aus (u,v)-Punkten -> Kanten in Weltkoordinaten
 function edgesOf(uv) {

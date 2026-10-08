@@ -4,7 +4,6 @@ import * as Auth from './auth.js';
 import * as Session from './session.js';
 import { Remote } from './onedrive.js';
 import { CONFIG } from './config.js';
-import { hausView } from './haus-view.js';
 import { icon, phaseIcon } from './icons.js';
 import { getTheme, setTheme } from './theme.js';
 import { splashOn, setSplash } from './splash.js';
@@ -1549,7 +1548,7 @@ function dependsOn(a, b, seen = new Set()) {
 }
 async function toggleTodo(t, done) {
   const wait = done ? openPreds(t) : [];
-  if (wait.length && !confirm(`Noch offen: ${wait.map((p) => p.title).join(', ')}.\n\nTrotzdem als erledigt markieren?`)) { render(); return; }
+  if (wait.length && !(await askConfirm(`Noch offen: ${wait.map((p) => p.title).join(', ')}. Trotzdem als erledigt markieren?`, 'Erledigt'))) { render(); return; }
   const el = done && document.querySelector(`.todo[data-id="${t.id}"]`);
   if (el) { el.querySelector('.todo-chk')?.replaceChildren(icon('check', { size: 20 })); el.classList.add('todo-pop'); await new Promise((r) => setTimeout(r, 420)); }
   await saveTodo({ ...t, done }, t.phaseId);
@@ -2542,9 +2541,8 @@ function docRulesCard() {
 }
 
 // Beispieldaten für Kosten (zum Ausprobieren); alle Einträge sind mit demo: true markiert und lassen sich wieder entfernen
-const demoCosts = () => Store.all('costs').filter((c) => c.demo);
 async function loadDemoCosts() {
-  const day = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+  const day = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toLocaleDateString('sv-SE'); };
   const N = 'Beispieldaten';
   const rows = [
     ['d-elek', 'Angebot Elektro komplett', 'Elektro Müller', 'elektro', 18400, 'angebot', 40],
@@ -2571,7 +2569,7 @@ async function loadDemoCosts() {
   const firmen = [['Elektro Müller', 'elektro', 'Frau Müller'], ['Fensterbau Weber', 'fenster', 'Herr Weber'], ['Metallbau Krause', 'fenster', ''], ['Haustechnik Schmidt', 'sanitaer', 'Herr Schmidt'], ['Dachdecker Lang', 'dach', 'Herr Lang'], ['Entsorgung Nord', 'oeltank', ''], ['Abbruch Becker', 'entkernung', ''], ['Bau Hoffmann', 'aufstockung', 'Herr Hoffmann'], ['Solartechnik Berg', 'solar', '']];
   for (const [nm, trade, contact] of firmen) await Store.save('settings', { id: 'd-firma-' + norm(nm).replace(/\W+/g, '-'), kind: 'company', demo: true, name: nm, trade, contact, phone: '01234 567890', email: '', note: 'Beispieldaten' });
   // Beispiel-Darlehen mit Auszahlungsplan für den Zahlungsplan (wird mit den Beispieldaten entfernt)
-  const ym = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 7); };
+  const ym = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d.toLocaleDateString('sv-SE').slice(0, 7); };
   await Store.save('settings', { ...LOAN_DEFAULT, id: 'd-loan', kind: 'loan', demo: true, name: 'Beispiel-Darlehen', amount: 150000, rate: 3.6, repay: 2, start: ym(0), payouts: [{ ym: ym(0), amount: 20000 }, { ym: ym(1), amount: 30000 }, { ym: ym(2), amount: 20000 }] });
 }
 
@@ -2879,6 +2877,14 @@ function syncBadge() {
 }
 
 // ---------- Rahmen und Navigation ----------
+// 3D-Modul (ca. 200 KB) erst beim ersten Öffnen laden
+let hausMod = null;
+function hausLazy() {
+  if (hausMod) return hausMod.hausView(phases());
+  const box = h('div', { class: 'view' }, h('p', { class: 'muted center' }, '3D-Haus wird geladen …'));
+  import('./haus-view.js').then((m) => { hausMod = m; if (route() === 'haus') render(); }).catch(() => box.replaceChildren(h('p', { class: 'muted center' }, '3D-Haus konnte nicht geladen werden (offline?).')));
+  return box;
+}
 const ROUTES = {
   '': ['Übersicht', viewHome],
   tagebuch: ['Tagebuch', viewDiary],
@@ -2892,7 +2898,7 @@ const ROUTES = {
   suche: ['Suche', viewSearch],
   firmen: ['Firmen', viewCompanies],
   einstellungen: ['Einstellungen', viewSettings],
-  haus: ['3D-Haus', () => hausView(phases())],
+  haus: ['3D-Haus', hausLazy],
 };
 const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['finanzierung', 'account_balance', 'Finanzierung'], ['maengel', 'warning', 'Mängel']];
 const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['einkauf', 'shopping_cart', 'Einkauf'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['firmen', 'contacts', 'Firmen'], ['einstellungen', 'settings', 'Einstellungen']];

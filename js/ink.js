@@ -1,6 +1,6 @@
 // Handschrift-Notizen: Zeichenfläche für Apple Pencil (Pointer Events mit Druck), Striche bleiben als Vektoren
 // editierbar (Undo/Redo, Radierer, Auswahl verschieben, Seiten, Hintergründe inkl. Foto zum Anmerken).
-import { h } from './ui.js';
+import { h, toast, askConfirm } from './ui.js';
 import { icon } from './icons.js';
 import * as Store from './store.js';
 
@@ -192,8 +192,8 @@ export async function openInk({ ref = null, photoIds = [], docBg = null } = {}) 
     const bPrev = btn('chevron_left', 'Vorherige Seite', () => goPage(pi - 1));
     const bNext = btn('chevron_right', 'Nächste Seite', () => goPage(pi + 1));
     const bAdd = btn('add', 'Seite hinzufügen', () => { doc.pages.push({ bg: cur().bg === 'photo' ? 'lined' : cur().bg, photo: null, strokes: [] }); changed = true; goPage(doc.pages.length - 1); });
-    const bClear = btn('restart_alt', 'Seite leeren', () => { if (!cur().strokes.length || !confirm('Alle Striche dieser Seite löschen?')) return; snap(); cur().strokes = []; sel.clear(); mark(); repaint(); });
-    const bRemove = btn('close', 'Seite entfernen', () => { if (doc.pages.length < 2 || !confirm('Diese Seite entfernen?')) return; doc.pages.splice(pi, 1); changed = true; goPage(Math.max(0, pi - 1)); });
+    const bClear = btn('restart_alt', 'Seite leeren', async () => { if (!cur().strokes.length || !(await askConfirm('Alle Striche dieser Seite löschen?', 'Löschen'))) return; snap(); cur().strokes = []; sel.clear(); mark(); repaint(); });
+    const bRemove = btn('close', 'Seite entfernen', async () => { if (doc.pages.length < 2 || !(await askConfirm('Diese Seite entfernen?', 'Entfernen'))) return; doc.pages.splice(pi, 1); changed = true; goPage(Math.max(0, pi - 1)); });
     const bDone = h('button', { type: 'button', class: 'ink-done', onclick: () => save() }, icon('check', { size: 20 }), ' Fertig');
     const bClose = btn('close', 'Schließen', () => close(null));
 
@@ -402,9 +402,10 @@ export async function openInk({ ref = null, photoIds = [], docBg = null } = {}) 
     const ro = new ResizeObserver(() => layout());
 
     let closed = false;
-    function close(result) {
+    async function close(result) {
       if (closed) return;
-      if (result === null && changed && !confirm('Änderungen verwerfen?')) return;
+      if (result === null && changed && !(await askConfirm('Änderungen verwerfen?', 'Verwerfen'))) return;
+      if (closed) return;
       closed = true;
       document.removeEventListener('keydown', onKey);
       ro.disconnect();
@@ -427,7 +428,7 @@ export async function openInk({ ref = null, photoIds = [], docBg = null } = {}) 
       } catch (err) {
         console.error(err);
         bDone.disabled = false; bDone.replaceChildren(icon('check', { size: 20 }), ' Fertig');
-        alert('Speichern fehlgeschlagen.');
+        toast('Speichern fehlgeschlagen.');
       }
     }
 
@@ -446,7 +447,7 @@ export async function openInk({ ref = null, photoIds = [], docBg = null } = {}) 
         doc.pages.forEach((p) => { p.strokes = p.strokes || []; });
         for (const p of doc.pages) if (p.bg === 'photo') loadImg(p.photo).then(repaint);
         ready = true; stage.classList.remove('loading'); mark(); repaint();
-      }).catch(() => { alert('Die Notiz konnte nicht geladen werden (offline?).'); ready = false; closed = false; close(ref); });
+      }).catch(() => { toast('Die Notiz konnte nicht geladen werden (offline?).'); ready = false; closed = false; close(ref); });
     } else { ready = true; if (docBg) loadImg('path:' + docBg.path).then(repaint); }
   });
 }

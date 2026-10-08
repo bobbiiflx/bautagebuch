@@ -157,10 +157,4 @@ export function hausView(phases) {
   return wrap;
 }
 
-// Für die Übersicht: nur Trigger prüfen und merken, ohne die Seite zu öffnen (Animation läuft beim nächsten Öffnen).
-export function noteChanges(phases) {
-  latest = phases;
-  if (!wrap) return;
-  checkTriggers();
-}
 export { hasAnim };
