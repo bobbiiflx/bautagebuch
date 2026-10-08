@@ -381,6 +381,7 @@ function costMini(budget) {
     paid + open > 0
       ? [stackBar([{ label: 'Bezahlt', value: paid, color: 'var(--viz-3)' }, { label: 'Rechnung offen', value: open, color: 'var(--viz-2)' }], paid + open),
         h('div', { class: 'offtxt' }, h('span', {}, h('b', {}, fmtEUR(paid)), ' bezahlt'), h('span', {}, h('b', {}, fmtEUR(open)), ' offen')),
+        ...(() => { const g = payGroups(); const late = g.find((x) => x.key === 'late'), wk = g.find((x) => x.key === 'week'); return [late ? h('div', { class: 'payhint bad' }, icon('warning', { filled: true, size: 16 }), ` ${late.list.length} überfällig · ${fmtEUR(sum(late.list, (c) => c.amount))}`) : null, wk ? h('div', { class: 'payhint warn' }, icon('today', { size: 16 }), ` ${wk.list.length} in 7 Tagen fällig · ${fmtEUR(sum(wk.list, (c) => c.amount))}`) : null]; })(),
         budget ? h('div', { class: 'muted small' }, net <= budget ? `${fmtEUR(budget - net)} vom Budget übrig` : `Budget um ${fmtEUR(net - budget)} überschritten`) : null]
       : h('p', { class: 'muted small' }, 'Noch keine Rechnungen eingetragen.'));
 }
@@ -710,12 +711,19 @@ function costForm(entry, preset) {
   });
   const split = entry && e.status === 'angebot' ? offerSplit(e) : null;
   const splitEl = split && split.ps.length ? h('div', { class: 'subbox' }, h('strong', {}, 'Abschlagszahlungen'), offerBar(e), split.ps.map((c) => h('div', { class: 'split small' }, h('span', {}, `${fmtDate(c.date)} · ${c.title}`), h('span', {}, fmtEUR(c.amount), ' ', chip(c.status === 'bezahlt' ? 'bezahlt' : 'offen', 'cs-' + c.status))))) : null;
+  // Zahlungsplan: Fälligkeit und Skonto (nur bei offenen Rechnungen)
+  const dueIn = h('input', { type: 'date', value: e.dueDate || '' });
+  const skPct = dec({ placeholder: 'z. B. 2', value: e.skontoPct ?? '' });
+  const skUntil = h('input', { type: 'date', value: e.skontoUntil || '' });
+  const payBox = h('div', { class: 'subbox' }, field('Zahlbar bis', dueIn, 'Erscheint im Zahlungsplan und auf der Startseite.'), field('Skonto (%)', skPct), field('Skonto gilt bis', skUntil, 'Nur bis dahin wird der Skontoabzug angezeigt.'));
+  const syncPay = () => { payBox.hidden = status.value !== 'offen'; };
+  status.addEventListener('change', syncPay); syncPay();
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
   const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
-  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
+  sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), payBox, partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
-      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
+      const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, dueDate: status.value === 'offen' ? dueIn.value : '', skontoPct: status.value === 'offen' ? Number(skPct.value) || 0 : 0, skontoUntil: status.value === 'offen' ? skUntil.value : '', paidDate: status.value === 'bezahlt' ? (e.paidDate || (e.status === 'bezahlt' ? '' : today())) : '', offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
       // Dokumente mit dem Kosten-Eintrag abgleichen: Kategorie (Angebot/Rechnung) und Gewerk
       for (const d of docsOfCost(saved)) {
@@ -867,6 +875,68 @@ function swipeCharts(out) {
   return h('div', { class: 'view-inner' }, track, out.length > 1 && dots);
 }
 
+// ---------- Zahlungsplan ----------
+const skontoOf = (c) => (Number(c.skontoPct) > 0 && c.skontoUntil && c.skontoUntil >= today() ? { pct: Number(c.skontoPct), until: c.skontoUntil, save: Math.round(c.amount * Number(c.skontoPct)) / 100 } : null);
+const openInvoices = (all = Store.all('costs')) => all.filter((c) => c.status === 'offen' && !isOffer(c));
+// Offene Rechnungen nach Fälligkeit: überfällig, in 7 Tagen, später, ohne Datum
+function payGroups(all = Store.all('costs')) {
+  const t0 = today(), t7 = addDays(t0, 7);
+  const list = openInvoices(all).sort((a, b) => (a.dueDate || '9999').localeCompare(b.dueDate || '9999'));
+  return [
+    { key: 'late', label: 'Überfällig', cls: 'bad', list: list.filter((c) => c.dueDate && c.dueDate < t0) },
+    { key: 'week', label: 'In den nächsten 7 Tagen', cls: 'warn', list: list.filter((c) => c.dueDate && c.dueDate >= t0 && c.dueDate <= t7) },
+    { key: 'later', label: 'Später', cls: '', list: list.filter((c) => c.dueDate && c.dueDate > t7) },
+    { key: 'none', label: 'Ohne Fälligkeit', cls: '', list: list.filter((c) => !c.dueDate) },
+  ].filter((g) => g.list.length);
+}
+async function markPaid(c) {
+  if (await askConfirm(`„${c.title}“ (${fmtEUR(c.amount)}) als bezahlt markieren?`, 'Bezahlt')) {
+    await Store.save('costs', { ...c, status: 'bezahlt', dueDate: '', paidDate: today() });
+    toast('Als bezahlt markiert.');
+  }
+}
+function payPlanCard(all) {
+  const groups = payGroups(all);
+  if (!groups.length) return null;
+  const total = sum(groups.flatMap((g) => g.list), (c) => c.amount);
+  const row = (c) => {
+    const sk = skontoOf(c);
+    return h('div', { class: 'payrow' },
+      h('button', { type: 'button', class: 'payin', onclick: () => costForm(c) },
+        h('span', { class: 'ovit' }, h('span', {}, c.title), h('span', { class: 'muted small' }, [c.dueDate ? 'fällig ' + fmtDate(c.dueDate) : '', c.vendor].filter(Boolean).join(' · ')),
+          sk ? h('span', { class: 'chip warn skchip' }, `Skonto ${String(sk.pct).replace('.', ',')} % bis ${fmtDate(sk.until)} · zahle ${fmtEUR(c.amount - sk.save)}`) : null),
+        h('strong', {}, fmtEUR(c.amount))),
+      h('button', { type: 'button', class: 'icon-btn small', 'aria-label': 'Als bezahlt markieren', onclick: () => markPaid(c) }, icon('check_circle', { size: 24 })));
+  };
+  return h('section', { class: 'card ov' },
+    h('div', { class: 'split' }, h('h3', {}, 'Zu zahlen'), h('strong', { class: 'amount' }, fmtEUR(total))),
+    ...groups.flatMap((g) => [h('div', { class: 'paygh ' + g.cls }, g.label, h('span', { class: 'muted small' }, ` · ${fmtEUR(sum(g.list, (c) => c.amount))}`)), ...g.list.map(row)]));
+}
+// Fällige Zahlungen je Monat gegen Darlehensauszahlungen
+function liquidityCard(all) {
+  const t0 = today(), ym0 = t0.slice(0, 7);
+  const due = {}, pay = {};
+  openInvoices(all).forEach((c) => { if (!c.dueDate) return; const k = c.dueDate < t0 ? ym0 : c.dueDate.slice(0, 7); due[k] = (due[k] || 0) + c.amount; });
+  const loansReal = Store.all('settings').filter((x) => x.kind === 'loan' && !x.planned);
+  loansReal.forEach((L) => (L.payouts || []).forEach((p) => { if (p.ym >= ym0) pay[p.ym] = (pay[p.ym] || 0) + Number(p.amount || 0); }));
+  const keys = [...new Set([...Object.keys(due), ...Object.keys(pay)])].sort();
+  if (!keys.length) return null;
+  let acc = 0;
+  const rows = keys.map((k) => { acc += (pay[k] || 0) - (due[k] || 0); return { k, d: due[k] || 0, p: pay[k] || 0, acc }; });
+  const max = Math.max(...rows.flatMap((r) => [r.d, r.p]), 1);
+  const noDue = sum(openInvoices(all).filter((c) => !c.dueDate), (c) => c.amount);
+  return h('section', { class: 'card ov' },
+    h('h3', {}, 'Zahlungen und Auszahlungen'),
+    h('p', { class: 'muted small' }, 'Fällige Rechnungen gegen Darlehensauszahlungen je Monat. Der Saldo läuft ab diesem Monat mit; vorhandenes Eigenkapital ist nicht eingerechnet.'),
+    ...rows.map((r) => h('div', { class: 'liq' },
+      h('div', { class: 'split' }, h('strong', {}, monthLabel(r.k)), h('span', { class: 'liqs ' + (r.acc < 0 ? 'bad' : 'ok') }, 'Saldo ' + fmtEUR(r.acc))),
+      h('div', { class: 'liqb' }, h('span', { class: 'liqt muted small' }, 'Fällig ' + fmtEUR(r.d)), h('span', { class: 'liqtr' }, h('span', { class: 'liqd', style: { width: (r.d / max) * 100 + '%' } }))),
+      h('div', { class: 'liqb' }, h('span', { class: 'liqt muted small' }, 'Auszahlung ' + fmtEUR(r.p)), h('span', { class: 'liqtr' }, h('span', { class: 'liqp', style: { width: (r.p / max) * 100 + '%' } }))))),
+    noDue > 0 ? h('p', { class: 'muted small' }, `Nicht enthalten: ${fmtEUR(noDue)} offene Rechnungen ohne Fälligkeit.`) : null,
+    loansReal.length ? null : h('p', { class: 'muted small' }, 'Keine Darlehen mit Auszahlungsplan angelegt.'),
+    Store.all('settings').some((x) => x.kind === 'loan' && x.planned) ? h('p', { class: 'muted small' }, 'Geplante Darlehen („Zum Budgetieren“) sind nicht eingerechnet.') : null);
+}
+
 // Kostenüberblick: Kosten (gestellte Rechnungen) getrennt nach bezahlt / offen, dazu Angebote und Förderung. Details nur auf Tipp.
 let ovOpen = '';
 function costOverview(all, sums) {
@@ -934,6 +1004,8 @@ function viewCosts() {
 
   const summary = [
     costOverview(all, sums),
+    payPlanCard(all),
+    liquidityCard(all),
     h('section', { class: 'card budget', onclick: budgetForm },
       h('div', { class: 'split' }, h('h3', {}, 'Budget'), h('strong', { class: 'amount' }, budget ? fmtEUR(budget) : '–')),
       parts.length
@@ -955,6 +1027,7 @@ function viewCosts() {
             h('div', { class: 'split' }, h('h3', {}, c.title), h('strong', { class: 'amount' }, fmtEUR(c.amount))),
             h('div', { class: 'muted small' }, [c.vendor, phaseName(c.phaseId)].filter(Boolean).join(' · ')),
             offerOf(c) && h('div', {}, chip('Abschlag zu ' + offerOf(c).title, 'cs-angebot')),
+            c.status === 'offen' && c.dueDate ? h('div', {}, chip((c.dueDate < today() ? 'Überfällig seit ' : 'Fällig ') + fmtDate(c.dueDate), c.dueDate < today() ? 'ds-offen' : 'warn')) : null,
             c.status === 'angebot' && offerSplit(c).ps.length ? offerBar(c) : null,
             c.status === 'angebot' && h('div', {}, h('button', { type: 'button', class: 'btn small', onclick: (ev) => { ev.stopPropagation(); costForm(null, { status: 'offen', offerId: c.id, vendor: c.vendor || '', phaseId: c.phaseId || '', title: `Abschlag ${offerSplit(c).ps.length + 1} ${c.title}` }); } }, icon('add', { size: 18 }), ' Abschlag anlegen')),
             c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
@@ -2092,7 +2165,7 @@ async function loadDemoCosts() {
   const rows = [
     ['d-elek', 'Angebot Elektro komplett', 'Elektro Müller', 'elektro', 18400, 'angebot', 40],
     ['d-elek-1', 'Abschlag 1 Elektro', 'Elektro Müller', 'elektro', 5000, 'bezahlt', 25, 'd-elek'],
-    ['d-elek-2', 'Abschlag 2 Elektro', 'Elektro Müller', 'elektro', 4000, 'offen', 5, 'd-elek'],
+    ['d-elek-2', 'Abschlag 2 Elektro', 'Elektro Müller', 'elektro', 4000, 'offen', 5, 'd-elek', 0, { dueDate: 6, skontoPct: 2, skontoUntil: 3 }],
     ['d-fen-a', 'Fenster Kunststoff', 'Fensterbau Weber', 'fenster', 14900, 'budgetangebot', 30],
     ['d-fen-b', 'Fenster Holz-Alu', 'Fensterbau Weber', 'fenster', 21800, 'budgetangebot', 30],
     ['d-fen-c', 'Fenster Alu', 'Metallbau Krause', 'fenster', 26500, 'budgetangebot', 28],
@@ -2102,12 +2175,18 @@ async function loadDemoCosts() {
     ['d-dach-b', 'Dacheindeckung Betonstein', 'Dachdecker Lang', 'dach', 23500, 'budgetangebot', 15],
     ['d-tank', 'Rechnung Öltank entfernen', 'Entsorgung Nord', 'oeltank', 3800, 'bezahlt', 90],
     ['d-kern', 'Rechnung Entkernung', 'Abbruch Becker', 'entkernung', 6200, 'bezahlt', 70],
-    ['d-roh', 'Rechnung Rohbau Aufstockung', 'Bau Hoffmann', 'aufstockung', 7500, 'offen', 3],
+    ['d-roh', 'Rechnung Rohbau Aufstockung', 'Bau Hoffmann', 'aufstockung', 7500, 'offen', 3, null, 0, { dueDate: -2 }],
+    ['d-dach-r', 'Abschlagsrechnung Dachstuhl', 'Dachdecker Lang', 'dach', 9800, 'offen', 1, null, 0, { dueDate: 30 }],
     ['d-solar', 'Anzahlung Solar', 'Solartechnik Berg', 'solar', 2000, 'bezahlt', 10, null, 500],
   ];
-  for (const [id, title, vendor, phaseId, amount, status, ago, offerId, sub] of rows) {
-    await Store.save('costs', { id, date: day(ago), title, vendor, phaseId, amount, status, offerId: offerId || '', note: N, demo: true, photos: [], docIds: [], subsidy: !!sub, subsidyAmount: sub || 0, subsidyPaid: false });
+  const inDays = (n) => day(-n);
+  for (const [id, title, vendor, phaseId, amount, status, ago, offerId, sub, pay] of rows) {
+    const pp = pay ? { dueDate: inDays(pay.dueDate), skontoPct: pay.skontoPct || 0, skontoUntil: pay.skontoUntil != null ? inDays(pay.skontoUntil) : '' } : {};
+    await Store.save('costs', { ...pp, id, date: day(ago), title, vendor, phaseId, amount, status, offerId: offerId || '', note: N, demo: true, photos: [], docIds: [], subsidy: !!sub, subsidyAmount: sub || 0, subsidyPaid: false });
   }
+  // Beispiel-Darlehen mit Auszahlungsplan für den Zahlungsplan (wird mit den Beispieldaten entfernt)
+  const ym = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 7); };
+  await Store.save('settings', { ...LOAN_DEFAULT, id: 'd-loan', kind: 'loan', demo: true, name: 'Beispiel-Darlehen', amount: 150000, rate: 3.6, repay: 2, start: ym(0), payouts: [{ ym: ym(0), amount: 20000 }, { ym: ym(1), amount: 30000 }, { ym: ym(2), amount: 20000 }] });
 }
 
 // ---------- Ansicht: Einstellungen ----------

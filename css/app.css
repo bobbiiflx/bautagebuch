@@ -691,3 +691,20 @@ input, select, textarea { font-size: max(16px, 1em); }
 /* Dokumente: ein Plus-Button, Auswahl klappt darüber auf */
 .fab-menu { position: fixed; right: 18px; bottom: calc(var(--tab) + env(safe-area-inset-bottom) + 88px); z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .fab-menu[hidden] { display: none; }
+
+/* Zahlungsplan */
+.paygh { font-weight: 650; font-size: .92rem; margin-top: 6px; }
+.paygh.bad { color: var(--bad-ink); } .paygh.warn { color: var(--warn-ink, #9a4a0f); }
+.payrow { display: flex; align-items: center; gap: 4px; }
+.payin { flex: 1; min-width: 0; display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--bg); color: var(--ink); min-height: 48px; }
+.payrow .icon-btn { color: var(--accent); flex: none; }
+.skchip { align-self: flex-start; margin-top: 2px; font-size: .74rem; }
+.liq { display: flex; flex-direction: column; gap: 4px; padding: 6px 0; border-top: 1px solid var(--line); }
+.liqs.ok { color: var(--ok-ink, #167a4d); } .liqs.bad { color: var(--bad-ink); } .liqs { font-weight: 600; font-size: .9rem; }
+.liqb { display: grid; grid-template-columns: 168px 1fr; align-items: center; gap: 8px; height: 22px; }
+.liqtr { height: 12px; border-radius: 6px; background: var(--viz-track); overflow: hidden; }
+.liqd, .liqp { display: block; height: 100%; border-radius: 6px; min-width: 2px; }
+.liqd { background: var(--viz-2); } .liqp { background: var(--viz-3); }
+.liqt { white-space: nowrap; }
+.payhint { display: flex; align-items: center; gap: 4px; font-size: .88rem; font-weight: 600; }
+.payhint.bad { color: var(--bad-ink); } .payhint.warn { color: var(--warn-ink, #9a4a0f); }
