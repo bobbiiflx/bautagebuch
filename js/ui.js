@@ -536,13 +536,13 @@ const docsOfCost = (c) => (c.docIds || []).map((id) => Store.get('documents', id
 const costsOfDoc = (d) => Store.all('costs').filter((c) => (c.docIds || []).includes(d.id));
 
 // Datei direkt als Dokument anlegen (oder bei identischem Inhalt das vorhandene verwenden)
-async function quickAddDoc(file, { cat, phaseId = '', tags = [], note = '' }) {
+async function quickAddDoc(file, { cat, phaseId = '', tags = [], note = '', name = '' }) {
   const hash = await Store.fileHash(file);
   const twin = await Store.findDuplicate(hash, file);
   if (twin) { toast(`„${twin.name}“ gab es schon – wird verknüpft.`); return { doc: Store.get('documents', twin.id) || twin, created: false }; }
   const id = Store.uid();
   const info = await Store.addDocumentFile(file, cat, id);
-  const doc = await Store.save('documents', { id, name: file.name.replace(/\.[^.]+$/, ''), category: cat, tags, pinned: false, phaseId, note, date: today(), hash, ...info });
+  const doc = await Store.save('documents', { id, name: name || file.name.replace(/\.[^.]+$/, ''), category: cat, tags, pinned: false, phaseId, note, date: today(), hash, ...info });
   ensurePreview(doc, true);
   return { doc, created: true };
 }
@@ -798,6 +798,7 @@ function searchAll(q) {
   add('costs', 'Kosten', 'payments', Store.all('costs'), (x) => [x.title, x.vendor, x.note, phaseName(x.phaseId)], (x) => `${x.title} · ${fmtEUR(x.amount)}`, (x) => [x.vendor, phaseName(x.phaseId), fmtDate(x.date)].filter(Boolean).join(' · '), costForm);
   add('defects', 'Mängel', 'warning', Store.all('defects'), (x) => [x.title, x.description, x.room, phaseName(x.phaseId)], (x) => x.title, (x) => [x.room, phaseName(x.phaseId)].filter(Boolean).join(' · '), defectForm);
   add('todos', 'Aufgaben', 'task_alt', Store.all('todos'), (x) => [x.title, x.note, x.assignee, phaseName(x.phaseId)], (x) => x.title, (x) => [x.done ? 'erledigt' : 'offen', phaseName(x.phaseId)].filter(Boolean).join(' · '), todoForm);
+  add('shopping', 'Einkauf', 'shopping_cart', Store.all('shopping'), (x) => [x.title, x.store, ...(x.items || []).map((i) => i.name + ' ' + (i.note || ''))], (x) => x.title, (x) => [x.store, x.done ? 'erledigt' : 'offen'].filter(Boolean).join(' · '), (x) => (x.done ? shopDoneDetail(x.id) : go('einkauf')));
   add('documents', 'Dokumente', 'folder', Store.all('documents'), (x) => [x.name, x.category, x.note, phaseName(x.phaseId)], (x) => x.name, (x) => [x.category, phaseName(x.phaseId)].filter(Boolean).join(' · '), docEditForm);
   add('phases', 'Planung', 'calendar_month', phases(), (x) => [x.name, x.note], (x) => x.name, (x) => x.progress + ' %', phaseForm);
   return rows.sort((a, b) => b.date.localeCompare(a.date));
@@ -1089,6 +1090,197 @@ function todoRow(t, withPhase = true) {
 }
 
 let showDone = false;
+// ---------- Ansicht: Einkauf ----------
+let shopTab = 'offen';
+const SHOP_UNITS = ['x', '×', 'stk', 'stück', 'sack', 'säcke', 'm', 'm²', 'm³', 'kg', 'l', 'pkg', 'pack', 'rolle', 'rollen', 'eimer', 'paar', 'set', 'karton'];
+const SHOP_STORES = ['Hornbach', 'OBI', 'Bauhaus', 'Toom', 'Hagebau', 'Globus Baumarkt', 'Baustoffhandel', 'Elektrogroßhandel'];
+const shopItems = (l) => l.items || [];
+const shopTotal = (l) => sum(shopItems(l), (i) => Number(i.price) || 0);
+const shopDoneN = (l) => shopItems(l).filter((i) => i.done).length;
+const shopStores = () => [...new Set([...Store.all('shopping').map((l) => l.store).filter(Boolean), ...SHOP_STORES])];
+// "3 Sack Zement" → Menge "3 Sack", Name "Zement"
+function parseShopLine(text) {
+  const t = text.trim();
+  const m = t.match(/^(\d+(?:[.,]\d+)?)\s*(\S+)?\s+(.+)$/);
+  if (m) {
+    if (m[2] && SHOP_UNITS.includes(m[2].toLowerCase())) return { qty: `${m[1]} ${m[2]}`, name: m[3] };
+    if (m[2]) return { qty: m[1], name: `${m[2]} ${m[3]}` };
+  }
+  return { qty: '', name: t };
+}
+
+async function shopToggle(id, itemId, on) {
+  const cur = Store.get('shopping', id);
+  if (!cur) return;
+  const items = shopItems(cur).map((i) => (i.id === itemId ? { ...i, done: on, doneBy: on ? Store.getUserName() : undefined } : i));
+  const all = items.length > 0 && items.every((i) => i.done);
+  const next = { ...cur, items };
+  if (all && !cur.done) { next.done = true; next.closedAt = today(); toast(`„${cur.title}“ ist komplett – liegt jetzt unter „Erledigt“. Dort kannst du den Beleg ablegen.`, 5000); }
+  else if (!all && cur.done) { next.done = false; next.closedAt = undefined; }
+  await Store.save('shopping', next);
+}
+
+function shopListForm(list) {
+  const e = list || { title: '', store: '', phaseId: '', items: [], done: false, created: today() };
+  const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Hornbach Samstag', value: e.title });
+  const store = h('input', { type: 'text', list: 'shop-stores', placeholder: 'Baumarkt / Händler', value: e.store || '' });
+  const dl = h('datalist', { id: 'shop-stores' }, shopStores().map((n) => h('option', { value: n })));
+  const phase = usageSelect(e.phaseId);
+  sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [field('Name', title), field('Wo wird eingekauft?', store), dl, field('Gewerk / Verwendung (optional)', phase)], {
+    onSave: () => Store.save('shopping', { ...e, title: title.value.trim(), store: store.value.trim(), phaseId: phase.value }),
+    onDelete: list && (() => Store.remove('shopping', e.id)),
+  });
+}
+
+function shopItemForm(listId, item) {
+  const l = Store.get('shopping', listId);
+  if (!l) return;
+  const it = item || { id: Store.uid(), name: '', qty: '', note: '', price: '', phaseId: '', photos: [], done: false };
+  const name = h('input', { type: 'text', required: true, value: it.name });
+  const qty = h('input', { type: 'text', placeholder: 'z. B. 3 Sack, 12 m', value: it.qty || '' });
+  const note = h('textarea', { rows: 3, placeholder: 'Marke, Maße, Artikelnummer, Regal …', value: it.note || '' });
+  const price = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', placeholder: 'optional', value: it.price ?? '' });
+  const phase = usageSelect(it.phaseId);
+  const pf = photoField(it.photos || []);
+  sheet(item ? 'Produkt' : 'Neues Produkt', [field('Produkt', name), field('Menge', qty), field('Preis (EUR)', price), field('Notiz', note), field('Gewerk / Verwendung', phase), pf.el], {
+    onSave: async () => {
+      const cur = Store.get('shopping', listId) || l;
+      const upd = { ...it, name: name.value.trim(), qty: qty.value.trim(), note: note.value.trim(), price: price.value === '' ? '' : Number(price.value), phaseId: phase.value, photos: pf.ids };
+      const items = shopItems(cur).some((x) => x.id === it.id) ? shopItems(cur).map((x) => (x.id === it.id ? upd : x)) : [...shopItems(cur), upd];
+      await Store.save('shopping', { ...cur, items });
+      await pf.commit();
+    },
+    onCancel: () => pf.cancel(),
+    onDelete: item && (async () => {
+      const cur = Store.get('shopping', listId) || l;
+      await Store.save('shopping', { ...cur, items: shopItems(cur).filter((x) => x.id !== it.id) });
+      await pf.commit();
+      await Store.discardPhotos(it.photos || []);
+    }),
+  });
+}
+
+function shopCard(l0) {
+  const id = l0.id;
+  const rows = h('div', { class: 'shi-list' });
+  const head = h('div', { class: 'shc-head' });
+  const input = h('input', { type: 'text', class: 'shop-add', placeholder: 'Produkt hinzufügen …', enterkeyhint: 'done', autocomplete: 'off', 'aria-label': 'Produkt hinzufügen' });
+  const paint = () => {
+    const l = Store.get('shopping', id);
+    if (!l) return;
+    const n = shopItems(l).length, d = shopDoneN(l), tot = shopTotal(l);
+    head.replaceChildren(
+      h('button', { type: 'button', class: 'shc-t', onclick: () => shopListForm(l) },
+        h('span', { class: 'shc-ic' }, icon('shopping_cart', { size: 22, filled: true })),
+        h('span', { class: 'shc-n' }, h('strong', {}, l.title), l.store ? h('span', { class: 'muted small' }, l.store) : null)),
+      h('span', { class: 'shc-c muted small' }, `${d}/${n}` + (tot ? ` · ca. ${fmtEUR(tot)}` : '')),
+      h('div', { class: 'bar shc-bar' }, h('div', { style: { width: (n ? (d / n) * 100 : 0) + '%' } })));
+    const items = shopItems(l).map((i, k) => ({ i, k })).sort((a, b) => Number(a.i.done) - Number(b.i.done) || a.k - b.k).map((x) => x.i);
+    rows.replaceChildren(...items.map((i) => h('div', { class: 'shi' + (i.done ? ' done' : '') },
+      h('input', { type: 'checkbox', checked: i.done, 'aria-label': i.name + ' abhaken', onchange: (e) => { e.target.closest('.shi').classList.toggle('done', e.target.checked); shopToggle(id, i.id, e.target.checked); } }),
+      h('button', { type: 'button', class: 'shi-t', onclick: () => shopItemForm(id, i) },
+        h('span', { class: 'shi-n' }, i.name),
+        i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null,
+        i.note ? icon('edit_note', { size: 16 }) : null,
+        i.photos?.length ? icon('image', { size: 16 }) : null,
+        i.price !== '' && i.price != null ? h('span', { class: 'muted small' }, fmtEUR(i.price)) : null))));
+  };
+  const add = async () => {
+    const txt = input.value.trim();
+    if (!txt) return;
+    input.value = '';
+    const cur = Store.get('shopping', id);
+    const { qty, name } = parseShopLine(txt);
+    await Store.save('shopping', { ...cur, items: [...shopItems(cur), { id: Store.uid(), name, qty, note: '', price: '', phaseId: '', photos: [], done: false }], done: false, closedAt: undefined });
+    paint();
+    input.focus();
+  };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  paint();
+  return h('section', { class: 'card shopcard' }, head, rows,
+    h('div', { class: 'shi-add' }, icon('add', { size: 20 }), input, h('button', { type: 'button', class: 'mv', 'aria-label': 'Hinzufügen', onmousedown: (e) => e.preventDefault(), onclick: add }, icon('check', { size: 22 }))));
+}
+
+// Erledigter Zettel: Belege ablegen, Kosten übernehmen
+function shopDoneDetail(id) {
+  const body = h('div', { class: 'shopd' });
+  let amt = '';
+  const paint = () => {
+    const l = Store.get('shopping', id);
+    if (!l) return;
+    const tot = shopTotal(l);
+    if (amt === '' && tot) amt = String(tot);
+    const cost = l.costId ? Store.get('costs', l.costId) : null;
+    const rec = (l.receiptIds || []).map((rid) => Store.get('documents', rid)).filter(Boolean);
+    const addReceipts = (kind) => pickFiles(kind, async (fs) => {
+      const cur = Store.get('shopping', id);
+      const ids = [...(cur.receiptIds || [])];
+      let k = ids.length;
+      for (const f of fs) {
+        try {
+          k++;
+          const { doc } = await quickAddDoc(f, { cat: 'Rechnungen', phaseId: cur.phaseId || '', tags: ['Einkauf', ...(cur.store ? [cur.store] : [])], name: `Beleg ${cur.title}` + (k > 1 ? ` (${k})` : '') });
+          if (!ids.includes(doc.id)) ids.push(doc.id);
+        } catch (e) { toast('Hochladen fehlgeschlagen: ' + (e.message || e)); }
+      }
+      await Store.save('shopping', { ...cur, receiptIds: ids });
+      const c = cur.costId && Store.get('costs', cur.costId);
+      if (c) await Store.save('costs', { ...c, docIds: [...new Set([...(c.docIds || []), ...ids])] });
+      paint();
+    });
+    const amtIn = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', value: amt, placeholder: 'laut Beleg', oninput: (e) => { amt = e.target.value; } });
+    body.replaceChildren(
+      h('p', { class: 'muted small' }, [l.store, l.closedAt ? 'abgeschlossen ' + fmtDate(l.closedAt) : ''].filter(Boolean).join(' · ')),
+      h('section', { class: 'card' }, h('h3', {}, `Artikel (${shopItems(l).length})`),
+        shopItems(l).map((i) => h('div', { class: 'shi done static' }, icon('check', { size: 18 }), h('span', { class: 'shi-n' }, i.name), i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null, i.price !== '' && i.price != null ? h('span', { class: 'muted small' }, fmtEUR(i.price)) : null))),
+      h('section', { class: 'card' }, h('h3', {}, 'Beleg'),
+        rec.length ? h('div', { class: 'attlist' }, rec.map((d) => h('div', { class: 'att' },
+          h('button', { type: 'button', class: 'att-open', onclick: () => openDoc(d) }, docIcon(d.mime), h('span', { class: 'att-n' }, d.name)),
+          h('button', { type: 'button', class: 'mv', 'aria-label': 'Verknüpfung entfernen', onclick: async () => { const cur = Store.get('shopping', id); await Store.save('shopping', { ...cur, receiptIds: (cur.receiptIds || []).filter((x) => x !== d.id) }); paint(); } }, '×')))) : h('p', { class: 'muted small' }, 'Noch kein Beleg abgelegt.'),
+        h('div', { class: 'row' },
+          h('button', { type: 'button', class: 'btn', onclick: () => addReceipts('cam') }, icon('photo_camera', { size: 20 }), ' Foto machen'),
+          h('button', { type: 'button', class: 'btn', onclick: () => addReceipts('up') }, icon('upload_file', { size: 20 }), ' Hochladen')),
+        h('p', { class: 'muted small' }, 'Belege erscheinen auch unter „Dokumente“ (Rechnungen, Tag „Einkauf“).')),
+      h('section', { class: 'card' }, h('h3', {}, 'Kosten'),
+        cost
+          ? [h('p', {}, `Erfasst als „${cost.title}“ · ${fmtEUR(cost.amount)}`), h('button', { type: 'button', class: 'btn block', onclick: () => costForm(cost) }, icon('payments', { size: 20 }), ' Kosten-Eintrag öffnen')]
+          : [field('Gesamtbetrag (EUR)', amtIn, tot ? 'Vorbelegt aus den Preisen der Produkte.' : 'Betrag laut Kassenbon.'),
+             h('button', { type: 'button', class: 'btn block', onclick: async () => {
+               const v = Number(amt);
+               if (!(v > 0)) return toast('Bitte den Gesamtbetrag eintragen.');
+               const cur = Store.get('shopping', id);
+               const c = await Store.save('costs', { id: Store.uid(), date: cur.closedAt || today(), title: `Einkauf ${cur.title}`, amount: v, vendor: cur.store || '', phaseId: cur.phaseId || '', status: 'bezahlt', note: '', photos: [], docIds: cur.receiptIds || [], subsidy: false, subsidyAmount: 0, subsidyPaid: false, shoppingId: cur.id });
+               await Store.save('shopping', { ...cur, costId: c.id });
+               toast('In Kosten übernommen.');
+               paint();
+             } }, icon('payments', { size: 20 }), ' In Kosten übernehmen')]),
+      h('button', { type: 'button', class: 'btn block', onclick: async () => { const cur = Store.get('shopping', id); await Store.save('shopping', { ...cur, done: false, closedAt: undefined }); dlg.close(); shopTab = 'offen'; render(); } }, 'Zettel wieder öffnen'),
+      h('button', { type: 'button', class: 'btn danger block', onclick: async () => { if (await askConfirm('Diesen Einkaufszettel wirklich löschen? Belege in „Dokumente“ bleiben erhalten.', 'Löschen')) { await Store.remove('shopping', id); dlg.close(); } } }, 'Zettel löschen'));
+  };
+  paint();
+  const dlg = sheet(Store.get('shopping', id)?.title || 'Einkaufszettel', [body], { noSave: true });
+}
+
+function viewShop() {
+  const all = Store.all('shopping');
+  const open = all.filter((l) => !l.done).sort((a, b) => (a.created || '').localeCompare(b.created || ''));
+  const done = all.filter((l) => l.done).sort((a, b) => (b.closedAt || '').localeCompare(a.closedAt || ''));
+  const tabs = h('div', { class: 'seg' }, [['offen', `Einkaufszettel (${open.length})`], ['erledigt', `Erledigt (${done.length})`]].map(([k, t]) => h('button', { class: 'pill' + (shopTab === k ? ' on' : ''), onclick: () => { shopTab = k; render(); } }, t)));
+  const doneCard = (l) => {
+    const rec = (l.receiptIds || []).filter((rid) => Store.get('documents', rid)).length;
+    const tot = l.costId && Store.get('costs', l.costId) ? Store.get('costs', l.costId).amount : shopTotal(l);
+    return h('article', { class: 'card entry', onclick: () => shopDoneDetail(l.id) },
+      h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(l.closedAt || l.created)), rec ? chip(`Beleg (${rec})`, 'done') : chip('Beleg fehlt', 'sub-open')),
+      h('div', { class: 'split' }, h('h3', {}, l.title), tot ? h('strong', { class: 'amount' }, (l.costId ? '' : 'ca. ') + fmtEUR(tot)) : null),
+      h('div', { class: 'muted small' }, [l.store, `${shopItems(l).length} Artikel`, l.costId ? 'in Kosten erfasst' : ''].filter(Boolean).join(' · ')));
+  };
+  return h('div', { class: 'view' }, tabs,
+    shopTab === 'offen'
+      ? (open.length ? open.map(shopCard) : empty('Kein Einkaufszettel', 'Lege einen Zettel pro Baumarkt oder Händler an und hake die Produkte unterwegs ab.'))
+      : (done.length ? done.map(doneCard) : empty('Noch nichts erledigt', 'Sobald alle Produkte eines Zettels abgehakt sind, landet er hier – mit Platz für den Beleg.')),
+    shopTab === 'offen' ? fab(() => shopListForm()) : null);
+}
+
 function viewTodos() {
   const all = Store.all('todos');
   const open = all.filter((t) => !t.done).sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
@@ -1777,6 +1969,7 @@ const ROUTES = {
   kosten: ['Kosten', viewCosts],
   maengel: ['Mängel', viewDefects],
   aufgaben: ['Aufgaben', viewTodos],
+  einkauf: ['Einkauf', viewShop],
   planung: ['Planung', viewPlan],
   dokumente: ['Dokumente', viewDocs],
   finanzierung: ['Finanzierung', viewFinance],
@@ -1785,7 +1978,7 @@ const ROUTES = {
   haus: ['3D-Haus', () => hausView(phases())],
 };
 const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['finanzierung', 'account_balance', 'Finanzierung'], ['maengel', 'warning', 'Mängel']];
-const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
+const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['einkauf', 'shopping_cart', 'Einkauf'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
 
 const ALL = [...NAV_, ...MORE_];
 const readHash = () => {

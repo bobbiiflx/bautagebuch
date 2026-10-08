@@ -8,7 +8,7 @@ import { DEFAULT_PHASES } from './phases.js';
 import { Remote } from './onedrive.js';
 import { AuthError } from './auth.js';
 
-export const TYPES = ['phases', 'diary', 'costs', 'defects', 'todos', 'documents', 'settings'];
+export const TYPES = ['phases', 'diary', 'costs', 'defects', 'todos', 'documents', 'shopping', 'settings'];
 
 const DB_NAME = 'bautagebuch';
 let db;
@@ -134,6 +134,7 @@ export async function remove(type, id) {
   // zugehörige Dateien (Fotos, Dokument) mitlöschen
   for (const p of prev.data.photos || []) await deleteBlobPair(photoPaths(p).full, photoPaths(p).thumb);
   for (const r of prev.data.sketches || []) await deleteBlobPair(sketchPaths(r).json, sketchPaths(r).png);
+  if (type === 'shopping') for (const it of prev.data.items || []) for (const p of it.photos || []) await deleteBlobPair(photoPaths(p).full, photoPaths(p).thumb);
   if (type === 'documents' && prev.data.path) {
     // verlinkte Dokumente teilen sich eine Datei: erst löschen, wenn niemand sie mehr braucht
     const shared = [...records.entries()].some(([k, r]) => k !== key && k.startsWith('documents/') && !r.deleted && r.data?.path === prev.data.path);
@@ -476,6 +477,7 @@ export function referencedBlobs() {
       for (const r of x.sketches || []) { out.add(sketchPaths(r).json); out.add(sketchPaths(r).png); }
     }
   }
+  for (const l of all('shopping')) for (const it of l.items || []) for (const id of it.photos || []) { out.add(photoPaths(id).full); out.add(photoPaths(id).thumb); }
   for (const d of all('documents')) { if (d.path) out.add(d.path); if (d.preview) out.add(d.preview); }
   return [...out];
 }

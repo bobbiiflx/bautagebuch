@@ -554,3 +554,27 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 .att-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .att-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .attc { display: inline-flex; align-items: center; gap: 2px; max-width: 100%; border: 0; cursor: pointer; }
+
+/* Einkauf */
+.shopcard { gap: 6px; }
+.shc-head { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; }
+.shc-t { display: flex; align-items: center; gap: 10px; border: 0; background: none; padding: 0; text-align: left; color: var(--ink); min-width: 0; }
+.shc-ic { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); flex: none; }
+.shc-n { display: flex; flex-direction: column; min-width: 0; }
+.shc-n strong, .shc-n span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shc-bar { grid-column: 1 / -1; }
+.shi-list { display: grid; }
+.shi { display: flex; align-items: center; gap: 12px; padding: 4px 0; border-top: 1px solid var(--line); min-height: 46px; }
+.shi:first-child { border-top: 0; }
+.shi-t { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 0; background: none; padding: 8px 0; text-align: left; color: var(--ink); font: inherit; }
+.shi-n { transition: opacity .2s; }
+.shi.done .shi-n { text-decoration: line-through; opacity: .5; }
+.shi.done .shi-t, .shi.done .shi-t svg { opacity: .7; }
+.shi.static { padding: 8px 0; gap: 8px; flex-wrap: wrap; }
+.shi.static .shi-n { text-decoration: none; opacity: 1; }
+.shi-add { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); }
+.shi-add input { border: 0; background: transparent; min-height: 40px; padding: 4px 0; flex: 1; }
+.shi-add input:focus { outline: none; }
+.shi input[type=checkbox]:checked { animation: shipop .25s ease; }
+@keyframes shipop { 50% { transform: scale(1.25); } }
+.shopd { display: grid; gap: 12px; }
