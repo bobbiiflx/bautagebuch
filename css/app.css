@@ -662,3 +662,17 @@ input, select, textarea { font-size: max(16px, 1em); }
 .vopt .vtt { font-weight: 550; }
 .vopt .va { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
 .vopt .vd { font-weight: 500; }
+
+/* Kostenüberblick */
+.ov { display: flex; flex-direction: column; gap: 8px; }
+.ov h3 { margin: 0; }
+.ovl { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; padding: 10px 6px; border: 0; border-radius: 10px; background: transparent; color: var(--ink); min-height: 44px; }
+.ovl.on { background: var(--accent-soft); }
+.ovl .ovt { flex: 1; min-width: 0; }
+.ovd { width: 12px; height: 12px; border-radius: 4px; flex: none; }
+.ovlist { display: flex; flex-direction: column; gap: 2px; padding: 2px 0 6px 22px; }
+.ovi { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 8px 10px; border: 0; border-radius: 10px; background: var(--bg); color: var(--ink); min-height: 44px; }
+.ovit { display: flex; flex-direction: column; min-width: 0; overflow-wrap: break-word; }
+.ovsep { border-top: 1px solid var(--line); margin: 4px 0; }
+.ovnet { align-items: baseline; gap: 12px; }
+.ovnet > span { display: flex; flex-direction: column; }

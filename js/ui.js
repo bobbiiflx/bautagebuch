@@ -400,7 +400,7 @@ function viewHome() {
     h(
       'div',
       { class: 'stats' },
-      stat('Ausgaben (netto)', fmtEUR(spent), budget ? `von ${fmtEUR(budget)} Budget` : 'Budget unter „Kosten“ festlegen', budget && spent > budget ? 'bad' : ''),
+      stat('Kosten (Rechnungen)', fmtEUR(spent), budget ? `von ${fmtEUR(budget)} Budget` : 'Budget unter „Kosten“ festlegen', budget && spent > budget ? 'bad' : ''),
       stat('Offene Rechnungen', fmtEUR(open)),
       stat('Offene Mängel', String(defects.length), defects.length ? 'siehe Mängel' : 'alles gut', defects.length ? 'warn' : ''),
       stat('Offene Aufgaben', String(todos.length))
@@ -790,7 +790,7 @@ function variantCard(all, sums, budget) {
     const row = (l, v, cls) => h('div', { class: 'split vrow' + (cls ? ' ' + cls : '') }, h('span', {}, l), h('strong', {}, v));
     box.replaceChildren(h('h3', {}, 'Variantenvergleich'), h('p', { class: 'muted small' }, 'Wähle je Gewerk eine Variante. Unten siehst du, wie sich das auf das Budget auswirkt.'), ...groupsEl,
       h('div', { class: 'vsum' },
-        row('Ausgaben (netto) und Angebote', fmtEUR(base)),
+        row('Kosten nach Förderung und Angebote', fmtEUR(base)),
         row('+ gewählte Varianten', fmtEUR(extra)),
         row('= Gesamt', fmtEUR(total), 'vtot'),
         budget ? row(left >= 0 ? 'Vom Budget übrig' : 'Budget überschritten um', fmtEUR(Math.abs(left)), left >= 0 ? 'vok' : 'vbad') : h('p', { class: 'muted small' }, 'Lege oben ein Budget fest, dann siehst du hier, was übrig bleibt.'),
@@ -857,6 +857,54 @@ function swipeCharts(out) {
   return h('div', { class: 'view-inner' }, track, out.length > 1 && dots);
 }
 
+// Kostenüberblick: Kosten (gestellte Rechnungen) getrennt nach bezahlt / offen, dazu Angebote und Förderung. Details nur auf Tipp.
+let ovOpen = '';
+function costOverview(all, sums) {
+  const real = all.filter((c) => !isOffer(c));
+  const paidL = real.filter((c) => c.status === 'bezahlt'), openL = real.filter((c) => c.status === 'offen');
+  const paid = sum(paidL, (c) => c.amount), open = sum(openL, (c) => c.amount);
+  const offerL = all.filter((c) => c.status === 'angebot').map((o) => ({ o, rest: Math.max(0, o.amount - sum(real.filter((c) => c.offerId === o.id), (c) => c.amount)) })).filter((x) => x.rest > 0);
+  const subs = real.filter((c) => c.subsidy && Number(c.subsidyAmount) > 0);
+  const fzPaidL = subs.filter((c) => c.subsidyPaid), fzOpenL = subs.filter((c) => !c.subsidyPaid);
+  const fzPaid = sum(fzPaidL, (c) => c.subsidyAmount), fzOpen = sum(fzOpenL, (c) => c.subsidyAmount);
+  const costs = paid + open;
+  const groups = {
+    bezahlt: { list: paidL.map((c) => ({ c, v: c.amount })), label: 'Bezahlt' },
+    offen: { list: openL.map((c) => ({ c, v: c.amount })), label: 'Rechnung offen' },
+    angebot: { list: offerL.map((x) => ({ c: x.o, v: x.rest })), label: 'Angebote, noch nicht abgerufen' },
+    fzpaid: { list: fzPaidL.map((c) => ({ c, v: c.subsidyAmount })), label: 'Förderung ausgezahlt' },
+    fzopen: { list: fzOpenL.map((c) => ({ c, v: c.subsidyAmount })), label: 'Förderung ausstehend' },
+  };
+  const box = h('section', { class: 'card ov' });
+  const legendRow = (key, color, value) => h('button', { type: 'button', class: 'ovl' + (ovOpen === key ? ' on' : ''), 'aria-expanded': ovOpen === key ? 'true' : 'false', onclick: () => { ovOpen = ovOpen === key ? '' : key; paint(); } },
+    h('span', { class: 'ovd', style: { background: color } }), h('span', { class: 'ovt' }, groups[key].label), h('strong', {}, fmtEUR(value)), icon(ovOpen === key ? 'expand_less' : 'expand_more', { size: 18 }));
+  const detail = (key) => ovOpen === key ? h('div', { class: 'ovlist' }, groups[key].list.length
+    ? groups[key].list.sort((a, b) => (b.c.date || '').localeCompare(a.c.date || '')).map(({ c, v }) => h('button', { type: 'button', class: 'ovi', onclick: () => costForm(c) }, h('span', { class: 'ovit' }, h('span', {}, c.title), h('span', { class: 'muted small' }, [fmtDate(c.date), c.vendor, phaseName(c.phaseId)].filter(Boolean).join(' · '))), h('strong', {}, fmtEUR(v))))
+    : h('p', { class: 'muted small' }, 'Keine Einträge.')) : null;
+  const paint = () => {
+    const bar1 = stackBar([{ label: 'Bezahlt', value: paid, color: 'var(--viz-3)' }, { label: 'Rechnung offen', value: open, color: 'var(--viz-2)' }, { label: 'Angebote, noch nicht abgerufen', value: sum(offerL, (x) => x.rest), color: 'var(--viz-track)' }], costs + sum(offerL, (x) => x.rest));
+    const out = [
+      h('div', { class: 'split' }, h('h3', {}, 'Kosten'), h('strong', { class: 'amount' }, fmtEUR(costs))),
+      h('p', { class: 'muted small' }, 'Alle gestellten Rechnungen, bezahlt und offen (brutto).'),
+      bar1,
+      legendRow('bezahlt', 'var(--viz-3)', paid), detail('bezahlt'),
+      legendRow('offen', 'var(--viz-2)', open), detail('offen'),
+      offerL.length ? [legendRow('angebot', 'var(--viz-track)', sum(offerL, (x) => x.rest)), detail('angebot')] : null,
+    ];
+    if (subs.length) {
+      out.push(h('div', { class: 'ovsep' }), h('div', { class: 'split' }, h('h3', {}, 'Förderung'), h('strong', { class: 'amount' }, fmtEUR(fzPaid + fzOpen))),
+        stackBar([{ label: 'Ausgezahlt', value: fzPaid, color: 'var(--viz-3)' }, { label: 'Ausstehend', value: fzOpen, color: 'var(--viz-4)' }], fzPaid + fzOpen),
+        legendRow('fzpaid', 'var(--viz-3)', fzPaid), detail('fzpaid'), legendRow('fzopen', 'var(--viz-4)', fzOpen), detail('fzopen'));
+    }
+    out.push(h('div', { class: 'ovsep' }),
+      h('div', { class: 'split ovnet' }, h('span', {}, 'Bisher ausgegeben', h('span', { class: 'muted small' }, ' bezahlt, abzüglich ausgezahlter Förderung')), h('strong', {}, fmtEUR(paid - fzPaid))),
+      h('div', { class: 'split ovnet' }, h('span', {}, 'Kosten nach Förderung', h('span', { class: 'muted small' }, ' auch offene Rechnungen')), h('strong', {}, fmtEUR(costs - fzPaid))));
+    box.replaceChildren(...out.flat(Infinity).filter(Boolean));
+  };
+  paint();
+  return box;
+}
+
 function viewCosts() {
   const all = Store.all('costs');
   const sums = costSums(all);
@@ -877,13 +925,7 @@ function viewCosts() {
   const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Belege (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
 
   const summary = [
-    h('div', { class: 'stats' },
-      stat('Ausgaben (netto)', fmtEUR(net), budget ? `${fmtEUR(budget - net)} vom Budget übrig` : null, budget && net > budget ? 'bad' : ''),
-      stat('Davon offen', fmtEUR(open)),
-      stat('Ausgaben brutto', fmtEUR(spent)),
-      stat('Angebote', fmtEUR(offers), 'ohne Budgetangebote'),
-      stat('Förderung ausgezahlt', fmtEUR(subPaid)),
-      stat('Förderung ausstehend', fmtEUR(subOpen), subOpen ? 'noch nicht ausgezahlt' : null, subOpen ? 'warn' : '')),
+    costOverview(all, sums),
     h('section', { class: 'card budget', onclick: budgetForm },
       h('div', { class: 'split' }, h('h3', {}, 'Budget'), h('strong', { class: 'amount' }, budget ? fmtEUR(budget) : '–')),
       parts.length
