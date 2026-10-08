@@ -1160,10 +1160,30 @@ function shopItemForm(listId, item) {
   });
 }
 
+// Einkaufswagen: pro abgehakter Artikel ein Paket im Korb; das neueste fällt hinein
+const CART_COLORS = ['#3b5bdb', '#f08c00', '#2f9e44', '#c2255c', '#1098ad', '#7048e8'];
+let shopFx = null; // {id, idx, t}: welches Paket gerade neu ist
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function cartSvg(done, total, fxIdx = -1) {
+  const shown = Math.min(done, 18);
+  const cols = 6, sz = 10, gap = 2, x0 = 34, yBase = 42;
+  let boxes = '';
+  for (let k = 0; k < shown; k++) {
+    const r = Math.floor(k / cols), c = k % cols;
+    const x = x0 + c * (sz + gap) + (r % 2 ? 3 : 0), y = yBase - sz - r * (sz + gap);
+    boxes += `<rect class="cb${k === fxIdx ? ' drop' : ''}" x="${x}" y="${y}" width="${sz}" height="${sz}" rx="2" fill="${CART_COLORS[k % CART_COLORS.length]}"/>`;
+  }
+  const full = total > 0 && done >= total;
+  return `<svg class="cart${full ? ' full' : ''}" viewBox="0 0 120 66" width="92" height="51" aria-hidden="true"><g class="cart-body"><path d="M3 6h13l14 38h66l11-30H22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>${boxes}<path d="M32 44h66" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><circle class="wh" cx="40" cy="55" r="5.5" fill="currentColor"/><circle class="wh" cx="88" cy="55" r="5.5" fill="currentColor"/></g></svg>`;
+}
+
 function shopCard(l0) {
   const id = l0.id;
   const rows = h('div', { class: 'shi-list' });
   const head = h('div', { class: 'shc-head' });
+  const cartBox = h('span', { class: 'shc-cart' });
+  let el = null;
   const input = h('input', { type: 'text', class: 'shop-add', placeholder: 'Produkt hinzufügen …', enterkeyhint: 'done', autocomplete: 'off', 'aria-label': 'Produkt hinzufügen' });
   const paint = () => {
     const l = Store.get('shopping', id);
@@ -1173,11 +1193,30 @@ function shopCard(l0) {
       h('button', { type: 'button', class: 'shc-t', onclick: () => shopListForm(l) },
         h('span', { class: 'shc-ic' }, icon('shopping_cart', { size: 22, filled: true })),
         h('span', { class: 'shc-n' }, h('strong', {}, l.title), l.store ? h('span', { class: 'muted small' }, l.store) : null)),
+      cartBox,
       h('span', { class: 'shc-c muted small' }, `${d}/${n}` + (tot ? ` · ca. ${fmtEUR(tot)}` : '')),
       h('div', { class: 'bar shc-bar' }, h('div', { style: { width: (n ? (d / n) * 100 : 0) + '%' } })));
+    const fx = shopFx && shopFx.id === id && Date.now() - shopFx.t < 1500 ? shopFx.idx : -1;
+    cartBox.innerHTML = cartSvg(d, n, fx);
     const items = shopItems(l).map((i, k) => ({ i, k })).sort((a, b) => Number(a.i.done) - Number(b.i.done) || a.k - b.k).map((x) => x.i);
     rows.replaceChildren(...items.map((i) => h('div', { class: 'shi' + (i.done ? ' done' : '') },
-      h('input', { type: 'checkbox', checked: i.done, 'aria-label': i.name + ' abhaken', onchange: (e) => { e.target.closest('.shi').classList.toggle('done', e.target.checked); shopToggle(id, i.id, e.target.checked); } }),
+      h('input', { type: 'checkbox', checked: i.done, 'aria-label': i.name + ' abhaken', onchange: async (e) => {
+        const on = e.target.checked;
+        e.target.closest('.shi').classList.toggle('done', on);
+        const cur = Store.get('shopping', id);
+        const doneBefore = shopDoneN(cur);
+        const completes = on && shopItems(cur).filter((x) => x.id !== i.id).every((x) => x.done);
+        if (on) shopFx = { id, idx: doneBefore, t: Date.now() };
+        if (completes && !reducedMotion()) {
+          // letzter Artikel: Paket fällt in den Wagen, dann rollt er davon, erst danach wandert der Zettel nach „Erledigt“
+          el.classList.add('busy');
+          cartBox.innerHTML = cartSvg(doneBefore + 1, shopItems(cur).length, doneBefore);
+          await sleep(650);
+          el.classList.add('rolling');
+          await sleep(950);
+        }
+        shopToggle(id, i.id, on);
+      } }),
       h('button', { type: 'button', class: 'shi-t', onclick: () => shopItemForm(id, i) },
         h('span', { class: 'shi-n' }, i.name),
         i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null,
@@ -1197,8 +1236,9 @@ function shopCard(l0) {
   };
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
   paint();
-  return h('section', { class: 'card shopcard' }, head, rows,
+  el = h('section', { class: 'card shopcard' }, head, rows,
     h('div', { class: 'shi-add' }, icon('add', { size: 20 }), input, h('button', { type: 'button', class: 'mv', 'aria-label': 'Hinzufügen', onmousedown: (e) => e.preventDefault(), onclick: add }, icon('check', { size: 22 }))));
+  return el;
 }
 
 // Erledigter Zettel: Belege ablegen, Kosten übernehmen
