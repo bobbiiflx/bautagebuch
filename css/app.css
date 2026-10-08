@@ -797,3 +797,4 @@ input, select, textarea { font-size: max(16px, 1em); }
 .prof-b { display: flex; gap: 8px; align-items: center; }
 .dr-me { display: flex; gap: 12px; align-items: center; min-width: 0; }
 .dr-me strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar.has-img { background: var(--card); }

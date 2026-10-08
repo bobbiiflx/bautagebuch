@@ -528,9 +528,13 @@ async function resizeAvatar(file, px = 256) {
   const c = document.createElement('canvas'); c.width = c.height = px;
   const ctx = c.getContext('2d');
   ctx.imageSmoothingQuality = 'high';
-  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
   ctx.drawImage(bmp, (w - side) / 2, (hgt - side) / 2, side, side, 0, 0, px, px);
   bmp.close?.();
+  // Transparenz (PNG/WebP) bleibt erhalten; Fotos ohne Transparenz werden als kleines JPEG gespeichert
+  const a = ctx.getImageData(0, 0, px, px).data;
+  let clear = false;
+  for (let i = 3; i < a.length; i += 4) if (a[i] < 250) { clear = true; break; }
+  if (clear) return c.toDataURL('image/png');
   return c.toDataURL('image/jpeg', 0.86);
 }
 async function saveProfilePhoto(name, photo) {
