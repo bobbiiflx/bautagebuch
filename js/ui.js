@@ -1098,15 +1098,18 @@ const shopItems = (l) => l.items || [];
 const shopTotal = (l) => sum(shopItems(l), (i) => Number(i.price) || 0);
 const shopDoneN = (l) => shopItems(l).filter((i) => i.done).length;
 const shopStores = () => [...new Set([...Store.all('shopping').map((l) => l.store).filter(Boolean), ...SHOP_STORES])];
-// "3 Sack Zement" → Menge "3 Sack", Name "Zement"
+// "3 Sack Zement #Estrichbeton" → Menge "3 Sack", Name "Zement", Detail (Notiz) "Estrichbeton"
 function parseShopLine(text) {
-  const t = text.trim();
+  const [main, ...rest] = text.split('#');
+  const note = rest.map((x) => x.trim()).filter(Boolean).join(', ');
+  const t = main.trim();
+  if (!t) return { qty: '', name: text.replace(/#/g, '').trim() || text.trim(), note: '' };
   const m = t.match(/^(\d+(?:[.,]\d+)?)\s*(\S+)?\s+(.+)$/);
   if (m) {
-    if (m[2] && SHOP_UNITS.includes(m[2].toLowerCase())) return { qty: `${m[1]} ${m[2]}`, name: m[3] };
-    if (m[2]) return { qty: m[1], name: `${m[2]} ${m[3]}` };
+    if (m[2] && SHOP_UNITS.includes(m[2].toLowerCase())) return { qty: `${m[1]} ${m[2]}`, name: m[3], note };
+    if (m[2]) return { qty: m[1], name: `${m[2]} ${m[3]}`, note };
   }
-  return { qty: '', name: t };
+  return { qty: '', name: t, note };
 }
 
 async function shopToggle(id, itemId, on) {
@@ -1182,11 +1185,15 @@ function shopCard(l0) {
   const head = h('div', { class: 'shc-head' });
   const cartBox = h('span', { class: 'shc-cart' });
   let el = null;
-  const input = h('input', { type: 'text', class: 'shop-add', placeholder: 'Produkt hinzufügen …', enterkeyhint: 'done', autocomplete: 'off', 'aria-label': 'Produkt hinzufügen' });
+  let pending = []; // gerade getippte Produkte, die noch gespeichert werden
+  let queue = Promise.resolve();
+  const input = h('input', { type: 'text', class: 'shop-add', placeholder: 'Produkt … #Detail', enterkeyhint: 'next', autocomplete: 'off', autocapitalize: 'sentences', 'aria-label': 'Produkt hinzufügen' });
+  const itemsNow = () => { const l = Store.get('shopping', id); return l ? [...shopItems(l), ...pending.filter((p) => !shopItems(l).some((x) => x.id === p.id))] : []; };
   const paint = () => {
     const l = Store.get('shopping', id);
     if (!l) return;
-    const n = shopItems(l).length, d = shopDoneN(l), tot = shopTotal(l);
+    const all = itemsNow();
+    const n = all.length, d = all.filter((i) => i.done).length, tot = sum(all, (i) => Number(i.price) || 0);
     head.replaceChildren(
       h('button', { type: 'button', class: 'shc-t', onclick: () => shopListForm(l) },
         h('span', { class: 'shc-ic' }, icon('shopping_cart', { size: 22, filled: true })),
@@ -1196,48 +1203,59 @@ function shopCard(l0) {
       h('div', { class: 'bar shc-bar' }, h('div', { style: { width: (n ? (d / n) * 100 : 0) + '%' } })));
     const fx = shopFx && shopFx.id === id && Date.now() - shopFx.t < 1500 ? shopFx.idx : -1;
     cartBox.innerHTML = cartHtml(d, fx);
-    const items = shopItems(l).map((i, k) => ({ i, k })).sort((a, b) => Number(a.i.done) - Number(b.i.done) || a.k - b.k).map((x) => x.i);
-    rows.replaceChildren(...items.map((i) => h('div', { class: 'shi' + (i.done ? ' done' : '') },
-      h('input', { type: 'checkbox', checked: i.done, 'aria-label': i.name + ' abhaken', onchange: async (e) => {
-        const on = e.target.checked;
-        e.target.closest('.shi').classList.toggle('done', on);
-        const cur = Store.get('shopping', id);
-        const doneBefore = shopDoneN(cur);
-        const completes = on && shopItems(cur).filter((x) => x.id !== i.id).every((x) => x.done);
-        if (on) shopFx = { id, idx: doneBefore, t: Date.now() };
-        if (completes && !reducedMotion()) {
-          // letzter Artikel: Paket fällt in den Wagen, dann rollt er davon, erst danach wandert der Zettel nach „Erledigt“
-          el.classList.add('busy');
-          cartBox.innerHTML = cartHtml(doneBefore + 1, doneBefore);
-          const cc = head.querySelector('.shc-c'); if (cc) cc.textContent = cc.textContent.replace(/^\d+/, String(doneBefore + 1));
-          const bf = head.querySelector('.shc-bar > div'); if (bf) bf.style.width = '100%';
-          await sleep(700);
-          el.classList.add('rolling');
-          await sleep(1150);
-        }
-        shopToggle(id, i.id, on);
-      } }),
-      h('button', { type: 'button', class: 'shi-t', onclick: () => shopItemForm(id, i) },
-        h('span', { class: 'shi-n' }, i.name),
-        i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null,
-        i.note ? icon('edit_note', { size: 16 }) : null,
-        i.photos?.length ? icon('image', { size: 16 }) : null,
-        i.price !== '' && i.price != null ? h('span', { class: 'muted small' }, fmtEUR(i.price)) : null))));
+    const items = all.map((i, k) => ({ i, k })).sort((a, b) => Number(a.i.done) - Number(b.i.done) || a.k - b.k).map((x) => x.i);
+    rows.replaceChildren(...items.map((i) => h('div', {
+      class: 'shi' + (i.done ? ' done' : ''), role: 'button', tabindex: 0, 'aria-pressed': String(!!i.done),
+      onclick: () => toggle(i), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(i); } },
+    },
+      h('span', { class: 'shi-ck' }, i.done ? icon('check', { size: 20 }) : null),
+      h('div', { class: 'shi-t' },
+        h('div', { class: 'shi-l' }, h('span', { class: 'shi-n' }, i.name), i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null),
+        i.note ? h('div', { class: 'shi-note muted small' }, i.note) : null,
+        i.photos?.length || (i.price !== '' && i.price != null)
+          ? h('div', { class: 'shi-meta muted small' }, i.photos?.length ? icon('image', { size: 15 }) : null, i.price !== '' && i.price != null ? fmtEUR(i.price) : null) : null),
+      h('button', { type: 'button', class: 'mv', 'aria-label': i.name + ': Details bearbeiten', onclick: (e) => { e.stopPropagation(); shopItemForm(id, i); } }, icon('edit', { size: 20 })))));
   };
-  const add = async () => {
+  // Antippen = erledigt / wieder offen
+  const toggle = async (i) => {
+    if (el.classList.contains('busy')) return;
+    const cur = Store.get('shopping', id);
+    if (!cur || !shopItems(cur).some((x) => x.id === i.id)) return; // noch nicht gespeichert
+    const on = !i.done;
+    const doneBefore = shopDoneN(cur);
+    const completes = on && shopItems(cur).filter((x) => x.id !== i.id).every((x) => x.done);
+    if (on) shopFx = { id, idx: doneBefore, t: Date.now() };
+    if (completes && !reducedMotion()) {
+      // letzter Artikel: Paket fällt in den Wagen, dann rollt er davon, erst danach wandert der Zettel nach „Erledigt“
+      el.classList.add('busy');
+      cartBox.innerHTML = cartHtml(doneBefore + 1, doneBefore);
+      const cc = head.querySelector('.shc-c'); if (cc) cc.textContent = cc.textContent.replace(/^\d+/, String(doneBefore + 1));
+      const bf = head.querySelector('.shc-bar > div'); if (bf) bf.style.width = '100%';
+      rows.querySelectorAll('.shi').forEach((r) => { if (r.querySelector('.shi-n')?.textContent === i.name) r.classList.add('done'); });
+      await sleep(700);
+      el.classList.add('rolling');
+      await sleep(1150);
+    }
+    shopToggle(id, i.id, on);
+  };
+  // Hinzufügen: sofort sichtbar, Cursor bleibt im Feld (Tastatur bleibt offen), Speichern läuft im Hintergrund
+  const add = () => {
     const txt = input.value.trim();
     if (!txt) return;
     input.value = '';
-    const cur = Store.get('shopping', id);
-    const { qty, name } = parseShopLine(txt);
-    await Store.save('shopping', { ...cur, items: [...shopItems(cur), { id: Store.uid(), name, qty, note: '', price: '', phaseId: '', photos: [], done: false }], done: false, closedAt: undefined });
+    const it = { id: Store.uid(), ...parseShopLine(txt), price: '', phaseId: '', photos: [], done: false };
+    pending.push(it);
     paint();
-    input.focus();
+    queue = queue.then(async () => {
+      const cur = Store.get('shopping', id);
+      if (cur && !shopItems(cur).some((x) => x.id === it.id)) await Store.save('shopping', { ...cur, items: [...shopItems(cur), it], done: false, closedAt: undefined });
+      pending = pending.filter((x) => x !== it);
+    }).catch((e) => toast('Speichern fehlgeschlagen: ' + (e.message || e)));
   };
-  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); input.focus(); } });
   paint();
   el = h('section', { class: 'card shopcard' }, head, rows,
-    h('div', { class: 'shi-add' }, icon('add', { size: 20 }), input, h('button', { type: 'button', class: 'mv', 'aria-label': 'Hinzufügen', onmousedown: (e) => e.preventDefault(), onclick: add }, icon('check', { size: 22 }))));
+    h('div', { class: 'shi-add' }, icon('add', { size: 20 }), input, h('button', { type: 'button', class: 'mv', 'aria-label': 'Hinzufügen', onmousedown: (e) => e.preventDefault(), onclick: () => { add(); input.focus(); } }, icon('check', { size: 22 }))));
   return el;
 }
 
@@ -2056,6 +2074,7 @@ export function render() {
   const r = route();
   // In den Einstellungen nicht neu zeichnen, während gerade getippt wird (z. B. der Freigabe-Link).
   const ae = document.activeElement;
+  if (r === 'einkauf' && ae?.classList?.contains('shop-add')) { renderAfterClose = true; return; } // Tastatur offen lassen
   if (r === 'einstellungen' && mainEl.contains(ae) && ['INPUT', 'TEXTAREA'].includes(ae.tagName)) { renderAfterClose = true; return; }
   const y = window.scrollY;
   const [title, view] = ROUTES[r];

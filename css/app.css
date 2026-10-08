@@ -568,19 +568,24 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 .shc-n strong, .shc-n span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shc-bar { grid-column: 1 / -1; }
 .shi-list { display: grid; }
-.shi { display: flex; align-items: center; gap: 12px; padding: 4px 0; border-top: 1px solid var(--line); min-height: 46px; }
+.shi { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line); min-height: 50px; cursor: pointer; -webkit-tap-highlight-color: transparent; user-select: none; }
 .shi:first-child { border-top: 0; }
-.shi-t { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 0; background: none; padding: 8px 0; text-align: left; color: var(--ink); font: inherit; }
+.shi:active { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.shi-ck { width: 22px; flex: none; display: grid; place-items: center; color: var(--accent); }
+.shi-ck svg { animation: shipop .28s ease; }
+.shi-t { flex: 1; min-width: 0; padding: 6px 0; }
+.shi-l { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .shi-n { transition: opacity .2s; }
+.shi-note { margin-top: 1px; }
+.shi-meta { display: flex; align-items: center; gap: 6px; margin-top: 1px; }
 .shi.done .shi-n { text-decoration: line-through; opacity: .5; }
-.shi.done .shi-t, .shi.done .shi-t svg { opacity: .7; }
-.shi.static { padding: 8px 0; gap: 8px; flex-wrap: wrap; }
+.shi.done .shi-note, .shi.done .shi-meta, .shi.done .tchip { opacity: .55; }
+.shi.static { padding: 8px 0; gap: 8px; flex-wrap: wrap; cursor: default; min-height: 0; }
 .shi.static .shi-n { text-decoration: none; opacity: 1; }
 .shi-add { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; color: var(--muted); }
 .shi-add input { border: 0; background: transparent; min-height: 40px; padding: 4px 0; flex: 1; }
 .shi-add input:focus { outline: none; }
-.shi input[type=checkbox]:checked { animation: shipop .25s ease; }
-@keyframes shipop { 50% { transform: scale(1.25); } }
+@keyframes shipop { 0% { transform: scale(.4); opacity: 0; } 60% { transform: scale(1.25); } 100% { transform: none; opacity: 1; } }
 .shopd { display: grid; gap: 12px; }
 
 .cartx { position: relative; display: block; width: 116px; line-height: 0; }
