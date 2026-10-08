@@ -708,3 +708,23 @@ input, select, textarea { font-size: max(16px, 1em); }
 .liqt { white-space: nowrap; }
 .payhint { display: flex; align-items: center; gap: 4px; font-size: .88rem; font-weight: 600; }
 .payhint.bad { color: var(--bad-ink); } .payhint.warn { color: var(--warn-ink, #9a4a0f); }
+
+/* Firmenverzeichnis */
+.coc { gap: 6px; }
+.cosum { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .88rem; color: var(--muted); }
+.cosum b { color: var(--ink); font-weight: 650; }
+.cosum .cow b { color: var(--warn-ink); }
+.cosum .cob { display: inline-flex; align-items: center; gap: 3px; color: var(--bad-ink); font-weight: 600; }
+.co-btns { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.co-btns a, .cd-actions a { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; color: var(--ink); }
+.cd-wrap { display: flex; flex-direction: column; gap: 14px; }
+.cd-head h2 { margin: 0 0 4px; }
+.cd-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.cd-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.cd-stats .stat { padding: 10px; }
+.cd-stats .stat-v { font-size: 1rem; }
+.cdg h3 { margin: 0 0 6px; }
+.cdo { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ovlist.cd { padding-left: 0; }
+.cdr { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.clamp3 { white-space: pre-line; }

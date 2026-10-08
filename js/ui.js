@@ -329,6 +329,7 @@ const QUICK = {
   'r:aufgaben': ['Aufgaben', 'task_alt', () => go('aufgaben'), () => Store.all('todos').filter((t) => !t.done).length],
   'r:maengel': ['Mängel', 'warning', () => go('maengel'), () => Store.all('defects').filter((d) => d.status === 'offen' || d.status === 'klaerung').length],
   'r:dokumente': ['Dokumente', 'folder', () => go('dokumente')],
+  'r:firmen': ['Firmen', 'contacts', () => go('firmen')],
   'r:kosten': ['Kosten', 'payments', () => go('kosten')],
   'r:tagebuch': ['Tagebuch', 'menu_book', () => go('tagebuch')],
   'r:planung': ['Planung', 'calendar_month', () => go('planung')],
@@ -339,6 +340,7 @@ const QUICK = {
   'n:defect': ['Neuer Mangel', 'add', () => defectForm()],
   'n:todo': ['Neue Aufgabe', 'add', () => todoForm()],
   'n:cost': ['Neue Kosten', 'add', () => costForm()],
+  'n:firma': ['Neue Firma', 'add', () => companyForm()],
   'n:shop': ['Neuer Einkaufszettel', 'add', () => { go('einkauf'); shopListForm(); }],
 };
 const QUICK_DEFAULT = ['r:einkauf', 'r:aufgaben', 'r:dokumente'];
@@ -686,7 +688,7 @@ function costForm(entry, preset) {
   const date = h('input', { type: 'date', required: true, value: e.date });
   const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Rechnung Elektro, Abschlag 1', value: e.title });
   const amount = dec({ required: true, step: '0.01', min: '0', inputmode: 'decimal', value: e.amount });
-  const vendor = h('input', { type: 'text', placeholder: 'Firma', value: e.vendor || '' });
+  const vendor = vendorInput(e.vendor, 'Firma');
   const phase = usageSelect(e.phaseId);
   const status = h('select', { value: e.status }, optionList(COST_STATES, e.status));
   const subOn = h('input', { type: 'checkbox', checked: !!e.subsidy });
@@ -725,6 +727,7 @@ function costForm(entry, preset) {
     onSave: async () => {
       const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, dueDate: status.value === 'offen' ? dueIn.value : '', skontoPct: status.value === 'offen' ? Number(skPct.value) || 0 : 0, skontoUntil: status.value === 'offen' ? skUntil.value : '', paidDate: status.value === 'bezahlt' ? (e.paidDate || (e.status === 'bezahlt' ? '' : today())) : '', offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
       await pf.commit();
+      await ensureCompany(saved.vendor, saved.phaseId);
       // Dokumente mit dem Kosten-Eintrag abgleichen: Kategorie (Angebot/Rechnung) und Gewerk
       for (const d of docsOfCost(saved)) {
         const patch = {};
@@ -1052,6 +1055,7 @@ function searchAll(q) {
     if (terms.every((t) => hay.includes(t))) rows.push({ type, label, icn, x, title: title(x), sub: sub(x), open: () => open(x), date: x.date || '' });
   });
   add('diary', 'Tagebuch', 'menu_book', Store.all('diary'), (x) => [x.title, x.text, x.who, phaseName(x.phaseId)], (x) => x.title, (x) => [fmtDate(x.date), x.who].filter(Boolean).join(' · '), diaryForm);
+  add('companies', 'Firmen', 'contacts', companies(), (x) => [x.name, x.contact, x.phone, x.email, x.note, phaseName(x.trade)], (x) => x.name, (x) => [phaseName(x.trade), x.phone].filter(Boolean).join(' · '), companyDetail);
   add('costs', 'Kosten', 'payments', Store.all('costs'), (x) => [x.title, x.vendor, x.note, phaseName(x.phaseId)], (x) => `${x.title} · ${fmtEUR(x.amount)}`, (x) => [x.vendor, phaseName(x.phaseId), fmtDate(x.date)].filter(Boolean).join(' · '), costForm);
   add('defects', 'Mängel', 'warning', Store.all('defects'), (x) => [x.title, x.description, x.room, phaseName(x.phaseId)], (x) => x.title, (x) => [x.room, phaseName(x.phaseId)].filter(Boolean).join(' · '), defectForm);
   add('todos', 'Aufgaben', 'task_alt', Store.all('todos'), (x) => [x.title, x.note, x.assignee, phaseName(x.phaseId)], (x) => x.title, (x) => [x.done ? 'erledigt' : 'offen', phaseName(x.phaseId)].filter(Boolean).join(' · '), todoForm);
@@ -1217,7 +1221,7 @@ function defectForm(entry) {
   const room = h('input', { type: 'text', list: 'rooms', placeholder: 'Raum / Ort', value: e.room || '' });
   const dl = h('datalist', { id: 'rooms' }, ROOMS.map((r) => h('option', { value: r })));
   const phase = usageSelect(e.phaseId, '– Gewerk unbekannt –');
-  const vendor = h('input', { type: 'text', placeholder: 'Verantwortliche Firma', value: e.vendor || '' });
+  const vendor = vendorInput(e.vendor, 'Verantwortliche Firma');
   const status = h('select', { value: e.status }, optionList(DEFECT_STATES, e.status));
   const due = h('input', { type: 'date', value: e.due || '' });
   const date = h('input', { type: 'date', required: true, value: e.date });
@@ -1225,6 +1229,7 @@ function defectForm(entry) {
   sheet(entry ? 'Mangel bearbeiten' : 'Neuer Mangel', [field('Festgestellt am', date), field('Titel', title), field('Beschreibung', desc), field('Ort', room), dl, field('Gewerk', phase), field('Verantwortlich', vendor), field('Status', status), field('Frist zur Behebung', due), pf.el], {
     onSave: async () => {
       await Store.save('defects', { ...e, date: date.value, title: title.value.trim(), description: desc.value.trim(), room: room.value.trim(), phaseId: phase.value, vendor: vendor.value.trim(), status: status.value, due: due.value, photos: pf.ids });
+      await ensureCompany(vendor.value, phase.value);
       await pf.commit();
     },
     onCancel: () => pf.cancel(),
@@ -2184,9 +2189,132 @@ async function loadDemoCosts() {
     const pp = pay ? { dueDate: inDays(pay.dueDate), skontoPct: pay.skontoPct || 0, skontoUntil: pay.skontoUntil != null ? inDays(pay.skontoUntil) : '' } : {};
     await Store.save('costs', { ...pp, id, date: day(ago), title, vendor, phaseId, amount, status, offerId: offerId || '', note: N, demo: true, photos: [], docIds: [], subsidy: !!sub, subsidyAmount: sub || 0, subsidyPaid: false });
   }
+  const firmen = [['Elektro Müller', 'elektro', 'Frau Müller'], ['Fensterbau Weber', 'fenster', 'Herr Weber'], ['Metallbau Krause', 'fenster', ''], ['Haustechnik Schmidt', 'sanitaer', 'Herr Schmidt'], ['Dachdecker Lang', 'dach', 'Herr Lang'], ['Entsorgung Nord', 'oeltank', ''], ['Abbruch Becker', 'entkernung', ''], ['Bau Hoffmann', 'aufstockung', 'Herr Hoffmann'], ['Solartechnik Berg', 'solar', '']];
+  for (const [nm, trade, contact] of firmen) await Store.save('settings', { id: 'd-firma-' + norm(nm).replace(/\W+/g, '-'), kind: 'company', demo: true, name: nm, trade, contact, phone: '01234 567890', email: '', note: 'Beispieldaten' });
   // Beispiel-Darlehen mit Auszahlungsplan für den Zahlungsplan (wird mit den Beispieldaten entfernt)
   const ym = (n) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 7); };
   await Store.save('settings', { ...LOAN_DEFAULT, id: 'd-loan', kind: 'loan', demo: true, name: 'Beispiel-Darlehen', amount: 150000, rate: 3.6, repay: 2, start: ym(0), payouts: [{ ym: ym(0), amount: 20000 }, { ym: ym(1), amount: 30000 }, { ym: ym(2), amount: 20000 }] });
+}
+
+// ---------- Firmenverzeichnis ----------
+// Firmen sind Einstellungs-Datensätze (kind: 'company'). Kosten und Mängel verweisen weiter über den Firmennamen (vendor).
+const companies = () => Store.all('settings').filter((x) => x.kind === 'company').sort((a, b) => (a.name || '').localeCompare(b.name || '', 'de'));
+const companyOf = (name) => { const n = norm(name); return n ? companies().find((c) => norm(c.name) === n) || null : null; };
+const isActiveDefect = (d) => d.status === 'offen' || d.status === 'klaerung';
+function companyStats(co) {
+  const n = norm(co.name);
+  const costs = Store.all('costs').filter((c) => norm(c.vendor) === n);
+  const defects = Store.all('defects').filter((d) => norm(d.vendor) === n);
+  const offers = costs.filter((c) => c.status === 'angebot'), budget = costs.filter((c) => c.status === 'budgetangebot'), inv = costs.filter((c) => !isOffer(c));
+  return {
+    costs, defects, offers, budget, inv,
+    paid: sum(inv.filter((c) => c.status === 'bezahlt'), (c) => c.amount),
+    open: sum(inv.filter((c) => c.status === 'offen'), (c) => c.amount),
+    offerRest: sum(offers, (o) => Math.max(0, o.amount - sum(inv.filter((c) => c.offerId === o.id), (c) => c.amount))),
+    openDefects: defects.filter(isActiveDefect).length,
+  };
+}
+// Firmenfeld mit Vorschlagsliste aus dem Verzeichnis
+function vendorInput(value, placeholder = 'Firma') {
+  let dl = document.getElementById('firmen-dl');
+  if (!dl) { dl = h('datalist', { id: 'firmen-dl' }); document.body.append(dl); }
+  dl.replaceChildren(...companies().map((c) => h('option', { value: c.name })));
+  return h('input', { type: 'text', placeholder, value: value || '', list: 'firmen-dl', autocomplete: 'off' });
+}
+// Neue Firmennamen aus Kosten/Mängeln wandern automatisch ins Verzeichnis
+async function ensureCompany(name, trade = '') {
+  const nm = String(name || '').trim();
+  if (!nm || companyOf(nm)) return;
+  await Store.save('settings', { id: Store.uid(), kind: 'company', name: nm, trade: trade || '', contact: '', phone: '', email: '', note: '' });
+}
+const strayVendors = () => {
+  const seen = new Map();
+  [...Store.all('costs'), ...Store.all('defects')].forEach((x) => { const v = String(x.vendor || '').trim(); if (v && !companyOf(v) && !seen.has(norm(v))) seen.set(norm(v), { name: v, trade: x.phaseId || '' }); });
+  return [...seen.values()];
+};
+function companyForm(entry) {
+  const e = entry || { name: '', trade: '', contact: '', phone: '', email: '', note: '' };
+  const name = h('input', { type: 'text', required: true, placeholder: 'z. B. Elektro Müller', value: e.name });
+  const trade = usageSelect(e.trade || '');
+  const contact = h('input', { type: 'text', placeholder: 'Ansprechpartner', value: e.contact || '' });
+  const phone = h('input', { type: 'tel', inputmode: 'tel', placeholder: 'Telefon', value: e.phone || '' });
+  const mail = h('input', { type: 'email', inputmode: 'email', placeholder: 'E-Mail', value: e.email || '', autocapitalize: 'off' });
+  const note = h('textarea', { rows: 3, value: e.note || '' });
+  sheet(entry ? 'Firma bearbeiten' : 'Neue Firma', [field('Firma', name), field('Gewerk', trade), field('Ansprechpartner', contact), field('Telefon', phone), field('E-Mail', mail), field('Notiz', note)], {
+    onSave: async () => {
+      const nm = name.value.trim();
+      const dup = companyOf(nm);
+      if (dup && dup.id !== e.id) { toast('Diese Firma gibt es schon.'); return false; }
+      await Store.save('settings', { ...e, id: e.id || Store.uid(), kind: 'company', name: nm, trade: trade.value, contact: contact.value.trim(), phone: phone.value.trim(), email: mail.value.trim(), note: note.value.trim() });
+      // Umbenennen: Einträge mit dem alten Namen übernehmen den neuen
+      if (entry && norm(entry.name) !== norm(nm)) {
+        for (const c of Store.all('costs')) if (norm(c.vendor) === norm(entry.name)) await Store.save('costs', { ...c, vendor: nm });
+        for (const d of Store.all('defects')) if (norm(d.vendor) === norm(entry.name)) await Store.save('defects', { ...d, vendor: nm });
+      }
+    },
+    onDelete: entry && (async () => { await Store.remove('settings', e.id); }),
+  });
+}
+function companyDetail(co) {
+  let dlg;
+  const st = companyStats(co);
+  const costRow = (c) => h('button', { type: 'button', class: 'ovi', onclick: () => costForm(c) },
+    h('span', { class: 'ovit' }, h('span', {}, c.title), h('span', { class: 'muted small' }, [fmtDate(c.date), phaseName(c.phaseId)].filter(Boolean).join(' · ')), c.status === 'offen' && c.dueDate ? h('span', { class: 'muted small' }, 'fällig ' + fmtDate(c.dueDate)) : null),
+    h('span', { class: 'cdr' }, h('strong', {}, fmtEUR(c.amount)), chip(COST_STATES.find((x) => x[0] === c.status)?.[1] || c.status, 'cs-' + c.status)));
+  const defRow = (d) => h('button', { type: 'button', class: 'ovi', onclick: () => defectForm(d) },
+    h('span', { class: 'ovit' }, h('span', {}, d.title), h('span', { class: 'muted small' }, [fmtDate(d.date), d.room].filter(Boolean).join(' · '))),
+    chip(DEFECT_STATES.find((x) => x[0] === d.status)?.[1] || d.status, 'ds-' + d.status));
+  const group = (title, list, row) => list.length ? h('section', { class: 'cdg' }, h('h3', {}, title, h('span', { class: 'muted small' }, ` · ${list.length}`)), h('div', { class: 'ovlist cd' }, list.map(row))) : null;
+  const offerBlock = st.offers.length ? h('section', { class: 'cdg' }, h('h3', {}, 'Angebote', h('span', { class: 'muted small' }, ` · ${st.offers.length}`)),
+    ...st.offers.map((o) => h('div', { class: 'cdo' }, costRow(o), offerSplit(o).ps.length ? offerBar(o) : null))) : null;
+  const body = h('div', { class: 'cd-wrap' },
+    h('div', { class: 'cd-head' }, h('h2', {}, co.name), co.trade ? chip(phaseName(co.trade), 'cs-angebot') : null, co.contact ? h('div', { class: 'muted' }, co.contact) : null),
+    h('div', { class: 'cd-actions' },
+      co.phone ? h('a', { class: 'btn', href: 'tel:' + co.phone.replace(/[^+\d]/g, '') }, icon('call', { size: 20 }), ' Anrufen') : null,
+      co.email ? h('a', { class: 'btn', href: 'mailto:' + co.email }, icon('mail', { size: 20 }), ' E-Mail') : null,
+      h('button', { type: 'button', class: 'btn', onclick: () => { dlg.close(); companyForm(co); } }, icon('edit', { size: 20 }), ' Bearbeiten')),
+    co.phone || co.email ? h('div', { class: 'muted small' }, [co.phone, co.email].filter(Boolean).join(' · ')) : null,
+    h('div', { class: 'cd-stats' },
+      stat('Bezahlt', fmtEUR(st.paid)), stat('Rechnung offen', fmtEUR(st.open), null, st.open ? 'warn' : ''), stat('Angebote (offen)', fmtEUR(st.offerRest))),
+    offerBlock,
+    group('Rechnungen', st.inv, costRow),
+    group('Budgetangebote', st.budget, costRow),
+    group('Mängel', st.defects, defRow),
+    !st.costs.length && !st.defects.length ? h('p', { class: 'muted small' }, 'Noch keine Angebote, Rechnungen oder Mängel mit dem Namen „' + co.name + '“.') : null,
+    co.note ? h('p', { class: 'clamp3' }, co.note) : null);
+  dlg = sheet(co.name, body, { noSave: true });
+}
+function viewCompanies() {
+  const list = companies();
+  const stray = strayVendors();
+  const q = h('input', { type: 'search', placeholder: 'Firma suchen', 'aria-label': 'Firma suchen', autocomplete: 'off' });
+  const cards = list.map((co) => {
+    const st = companyStats(co);
+    const el = h('article', { class: 'card entry coc', onclick: () => companyDetail(co), 'data-q': norm([co.name, co.contact, co.phone, co.email, phaseName(co.trade)].join(' ')) },
+      h('div', { class: 'split' }, h('h3', {}, co.name), co.trade ? chip(phaseName(co.trade), 'cs-angebot') : null),
+      co.contact ? h('div', { class: 'muted small' }, co.contact) : null,
+      st.costs.length || st.defects.length
+        ? h('div', { class: 'cosum' },
+            st.offerRest ? h('span', {}, 'Angebote ', h('b', {}, fmtEUR(st.offerRest))) : null,
+            st.open ? h('span', { class: 'cow' }, 'Offen ', h('b', {}, fmtEUR(st.open))) : null,
+            st.paid ? h('span', {}, 'Bezahlt ', h('b', {}, fmtEUR(st.paid))) : null,
+            st.openDefects ? h('span', { class: 'cob' }, icon('warning', { size: 15, filled: true }), ` ${st.openDefects} Mängel`) : null)
+        : h('div', { class: 'muted small' }, 'Noch keine Einträge'),
+      co.phone || co.email
+        ? h('div', { class: 'co-btns' },
+            co.phone ? h('a', { class: 'pill small', href: 'tel:' + co.phone.replace(/[^+\d]/g, ''), onclick: (ev) => ev.stopPropagation() }, icon('call', { size: 16 }), ' ' + co.phone) : null,
+            co.email ? h('a', { class: 'pill small', href: 'mailto:' + co.email, onclick: (ev) => ev.stopPropagation() }, icon('mail', { size: 16 }), ' E-Mail') : null)
+        : null);
+    return el;
+  });
+  const none = h('div', { class: 'muted small center', hidden: true }, 'Keine Firma gefunden.');
+  q.addEventListener('input', () => { const t = norm(q.value); let n = 0; cards.forEach((c) => { const hit = !t || c.dataset.q.includes(t); c.hidden = !hit; if (hit) n++; }); none.hidden = n > 0; });
+  return h('div', { class: 'view' },
+    list.length > 4 ? q : null,
+    stray.length ? h('button', { type: 'button', class: 'btn block', onclick: async () => { for (const s of stray) await ensureCompany(s.name, s.trade); toast(`${stray.length} Firmen übernommen.`); } }, icon('add', { size: 18 }), ` ${stray.length} Firmen aus Kosten und Mängeln übernehmen`) : null,
+    cards.length ? cards : empty('Noch keine Firmen', 'Lege Handwerker und Händler mit Telefon und Gewerk an. Hier siehst du je Firma Angebote, Rechnungen und Mängel.', 'contacts'),
+    none,
+    fab(() => companyForm()));
 }
 
 // ---------- Ansicht: Einstellungen ----------
@@ -2374,11 +2502,12 @@ const ROUTES = {
   dokumente: ['Dokumente', viewDocs],
   finanzierung: ['Finanzierung', viewFinance],
   suche: ['Suche', viewSearch],
+  firmen: ['Firmen', viewCompanies],
   einstellungen: ['Einstellungen', viewSettings],
   haus: ['3D-Haus', () => hausView(phases())],
 };
 const NAV_ = [['', 'home', 'Übersicht'], ['haus', 'view_in_ar', '3D-Haus'], ['tagebuch', 'menu_book', 'Tagebuch'], ['kosten', 'payments', 'Kosten'], ['finanzierung', 'account_balance', 'Finanzierung'], ['maengel', 'warning', 'Mängel']];
-const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['einkauf', 'shopping_cart', 'Einkauf'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['einstellungen', 'settings', 'Einstellungen']];
+const MORE_ = [['aufgaben', 'task_alt', 'Aufgaben'], ['einkauf', 'shopping_cart', 'Einkauf'], ['planung', 'calendar_month', 'Planung'], ['dokumente', 'folder', 'Dokumente'], ['firmen', 'contacts', 'Firmen'], ['einstellungen', 'settings', 'Einstellungen']];
 
 const ALL = [...NAV_, ...MORE_];
 const readHash = () => {
