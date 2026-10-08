@@ -625,3 +625,8 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 .qb { position: absolute; top: -6px; right: -8px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 99px; background: var(--accent); color: var(--accent-ink); font-size: .72rem; font-weight: 700; display: grid; place-items: center; border: 2px solid var(--card); box-sizing: content-box; }
 .ql { font-size: .82rem; font-weight: 600; text-align: center; line-height: 1.2; }
 .qedit { justify-self: end; display: inline-flex; align-items: center; gap: 4px; }
+
+/* Menü: Einstellungen am unteren Rand */
+dialog.drawer[open] { display: flex; flex-direction: column; }
+.drawer-list { flex: 1; overflow-y: auto; }
+.drawer-item.last { margin-top: auto; border-top: 1px solid var(--line, rgba(128,128,128,.25)); border-radius: 0 0 12px 12px; padding-top: 15px; }
