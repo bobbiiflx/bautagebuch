@@ -508,7 +508,7 @@ function phaseColor(id) {
 }
 // ---------- Wischen nach links: Löschen ----------
 let swipeOpen = null;
-const resetSwipe = (w) => { w.classList.remove('open'); const c = w.lastChild; c.style.transition = 'transform .2s ease'; c.style.transform = ''; };
+const resetSwipe = (w) => { w.classList.remove('open'); const c = w.lastChild; c.style.transition = 'transform .2s ease'; c.style.transform = ''; setTimeout(() => { if (!w.classList.contains('open')) w.classList.remove('drag'); }, 230); };
 const closeSwipe = () => { if (swipeOpen) { resetSwipe(swipeOpen); swipeOpen = null; } };
 function swipeDel(card, doDelete, right = null, label = 'Löschen') {
   const W = 92;
@@ -531,18 +531,20 @@ function swipeDel(card, doDelete, right = null, label = 'Löschen') {
       if (Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my) * 1.5) { mode = 'h'; try { wrap.setPointerCapture(pid); } catch {} } else return;
     }
     moved = true;
+    wrap.classList.add('drag');
     dx = Math.max(-W - 24, Math.min(right ? W + 24 : 0, base + mx));
     setX(dx, false);
-    if (ract) ract.classList.toggle('on', dx > 70);
+    if (ract) ract.classList.toggle('on', dx > 56);
   });
   const end = (e) => {
     if (e.pointerId !== pid) return;
     pid = null;
     if (mode !== 'h') return;
-    if (right && dx > 70) { setX(0, true); wrap.classList.remove('open'); if (ract) ract.classList.remove('on'); Promise.resolve(right.run()).catch(() => toast('Aktion fehlgeschlagen.')); return; }
+    if (right && dx > 56) { setX(0, true); wrap.classList.remove('open'); setTimeout(() => wrap.classList.remove('drag'), 230); if (ract) ract.classList.remove('on'); Promise.resolve(right.run()).catch(() => toast('Aktion fehlgeschlagen.')); return; }
     const open = dx < -W * 0.5;
     setX(open ? -W : 0, true);
     wrap.classList.toggle('open', open);
+    if (!open) setTimeout(() => { if (!wrap.classList.contains('open')) wrap.classList.remove('drag'); }, 230);
     swipeOpen = open ? wrap : (swipeOpen === wrap ? null : swipeOpen);
   };
   wrap.addEventListener('pointerup', end);

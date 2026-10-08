@@ -815,3 +815,7 @@ input, select, textarea { font-size: max(16px, 1em); }
 .sw-act { position: absolute; top: 0; left: 0; bottom: 0; width: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--accent, #3b5bdb); color: #fff; font-size: 12px; font-weight: 600; opacity: .85; transition: opacity .15s; }
 .sw-act.ok { background: var(--ok, #1f9d63); }
 .sw-act.on { opacity: 1; }
+/* Aktionsflächen nur während der Geste sichtbar (sonst blitzen sie an den runden Ecken durch) */
+.sw > .sw-del, .sw > .sw-act { visibility: hidden; }
+.sw.drag > .sw-del, .sw.drag > .sw-act, .sw.open > .sw-del { visibility: visible; }
+.sw > :last-child { background-clip: padding-box; }
