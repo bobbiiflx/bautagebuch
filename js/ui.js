@@ -1160,22 +1160,20 @@ function shopItemForm(listId, item) {
   });
 }
 
-// Einkaufswagen: pro abgehakter Artikel ein Paket im Korb; das neueste fällt hinein
-const CART_COLORS = ['#3b5bdb', '#f08c00', '#2f9e44', '#c2255c', '#1098ad', '#7048e8'];
+// Einkaufswagen (Bilder aus icons/): pro abgehakter Artikel ein Paket auf der Ladefläche; das neueste fällt hinein
 let shopFx = null; // {id, idx, t}: welches Paket gerade neu ist
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-function cartSvg(done, total, fxIdx = -1) {
-  const shown = Math.min(done, 18);
-  const cols = 6, sz = 10, gap = 2, x0 = 34, yBase = 42;
+// Stapelplätze auf der Ladefläche: [Mitte x %, Lage]
+const CART_SLOTS = [[24, 0], [44, 0], [64, 0], [84, 0], [34, 1], [54, 1], [74, 1], [44, 2], [64, 2], [54, 3]];
+function cartHtml(done, fxIdx = -1) {
   let boxes = '';
-  for (let k = 0; k < shown; k++) {
-    const r = Math.floor(k / cols), c = k % cols;
-    const x = x0 + c * (sz + gap) + (r % 2 ? 3 : 0), y = yBase - sz - r * (sz + gap);
-    boxes += `<rect class="cb${k === fxIdx ? ' drop' : ''}" x="${x}" y="${y}" width="${sz}" height="${sz}" rx="2" fill="${CART_COLORS[k % CART_COLORS.length]}"/>`;
+  for (let k = 0; k < Math.min(done, CART_SLOTS.length); k++) {
+    const [x, layer] = CART_SLOTS[k];
+    const bottom = 41 - (x - 50) * 0.12 + layer * 14.5;
+    boxes += `<img class="cx-box${k === fxIdx ? ' drop' : ''}" src="icons/box.webp" alt="" style="left:${x - 11.5}%;bottom:${bottom}%;--r:${(((k * 37) % 7) - 3) * 1.2}deg">`;
   }
-  const full = total > 0 && done >= total;
-  return `<svg class="cart${full ? ' full' : ''}" viewBox="0 0 120 66" width="92" height="51" aria-hidden="true"><g class="cart-body"><path d="M3 6h13l14 38h66l11-30H22" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>${boxes}<path d="M32 44h66" stroke="currentColor" stroke-width="3.2" stroke-linecap="round"/><circle class="wh" cx="40" cy="55" r="5.5" fill="currentColor"/><circle class="wh" cx="88" cy="55" r="5.5" fill="currentColor"/></g></svg>`;
+  return `<span class="cartx"><img class="cx-cart" src="icons/cart.webp" alt="" width="116">${boxes}</span>`;
 }
 
 function shopCard(l0) {
@@ -1197,7 +1195,7 @@ function shopCard(l0) {
       h('span', { class: 'shc-c muted small' }, `${d}/${n}` + (tot ? ` · ca. ${fmtEUR(tot)}` : '')),
       h('div', { class: 'bar shc-bar' }, h('div', { style: { width: (n ? (d / n) * 100 : 0) + '%' } })));
     const fx = shopFx && shopFx.id === id && Date.now() - shopFx.t < 1500 ? shopFx.idx : -1;
-    cartBox.innerHTML = cartSvg(d, n, fx);
+    cartBox.innerHTML = cartHtml(d, fx);
     const items = shopItems(l).map((i, k) => ({ i, k })).sort((a, b) => Number(a.i.done) - Number(b.i.done) || a.k - b.k).map((x) => x.i);
     rows.replaceChildren(...items.map((i) => h('div', { class: 'shi' + (i.done ? ' done' : '') },
       h('input', { type: 'checkbox', checked: i.done, 'aria-label': i.name + ' abhaken', onchange: async (e) => {
@@ -1210,10 +1208,12 @@ function shopCard(l0) {
         if (completes && !reducedMotion()) {
           // letzter Artikel: Paket fällt in den Wagen, dann rollt er davon, erst danach wandert der Zettel nach „Erledigt“
           el.classList.add('busy');
-          cartBox.innerHTML = cartSvg(doneBefore + 1, shopItems(cur).length, doneBefore);
-          await sleep(650);
+          cartBox.innerHTML = cartHtml(doneBefore + 1, doneBefore);
+          const cc = head.querySelector('.shc-c'); if (cc) cc.textContent = cc.textContent.replace(/^\d+/, String(doneBefore + 1));
+          const bf = head.querySelector('.shc-bar > div'); if (bf) bf.style.width = '100%';
+          await sleep(700);
           el.classList.add('rolling');
-          await sleep(950);
+          await sleep(1150);
         }
         shopToggle(id, i.id, on);
       } }),
