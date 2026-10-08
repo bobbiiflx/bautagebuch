@@ -1151,10 +1151,20 @@ function shopListForm(list) {
   if (store) { const top = TOP_MARKETS.some((m) => m.name === store); if (!top && !known && !customStores().includes(store)) { own.hidden = false; own.value = store; more.value = '__own'; } }
   const phase = usageSelect(e.phaseId);
   pick(store, false);
-  sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [
+  let dlg = null;
+  const finish = list && !list.done ? h('button', { type: 'button', class: 'btn block', onclick: async () => {
+    const cur = Store.get('shopping', e.id) || e;
+    const openN = shopItems(cur).filter((i) => !i.done).length;
+    if (openN && !(await askConfirm(`${openN} ${openN === 1 ? 'Produkt ist' : 'Produkte sind'} noch nicht abgehakt. Den Zettel trotzdem als erledigt markieren?`, 'Als erledigt markieren'))) return;
+    await Store.save('shopping', { ...cur, done: true, closedAt: today() });
+    dlg.close();
+    toast(`„${cur.title}“ liegt jetzt unter „Erledigt“.`);
+  } }, icon('task_alt', { size: 20 }), ' Als erledigt markieren') : null;
+  dlg = sheet(list ? 'Einkaufszettel bearbeiten' : 'Neuer Einkaufszettel', [
     field('Wo wird eingekauft?', h('div', { class: 'stpick' }, chips, more, own, chosen)),
     field('Name des Zettels', title),
-    field('Gewerk / Verwendung (optional)', phase)], {
+    field('Gewerk / Verwendung (optional)', phase),
+    finish], {
     saveLabel: list ? 'Speichern' : 'Zettel anlegen',
     onSave: () => Store.save('shopping', { ...e, title: title.value.trim() || store || 'Einkaufszettel', store, phaseId: phase.value }),
     onDelete: list && (() => Store.remove('shopping', e.id)),
@@ -1315,8 +1325,8 @@ function shopDoneDetail(id) {
     const amtIn = h('input', { type: 'number', step: '0.01', min: '0', inputmode: 'decimal', value: amt, placeholder: 'laut Beleg', oninput: (e) => { amt = e.target.value; } });
     body.replaceChildren(
       h('p', { class: 'muted small' }, [l.store, l.closedAt ? 'abgeschlossen ' + fmtDate(l.closedAt) : ''].filter(Boolean).join(' · ')),
-      h('section', { class: 'card' }, h('h3', {}, `Artikel (${shopItems(l).length})`),
-        shopItems(l).map((i) => h('div', { class: 'shi done static' }, icon('check', { size: 18 }), h('span', { class: 'shi-n' }, i.name), i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null, i.price !== '' && i.price != null ? h('span', { class: 'muted small' }, fmtEUR(i.price)) : null))),
+      h('section', { class: 'card' }, h('h3', {}, shopDoneN(l) < shopItems(l).length ? `Artikel (${shopDoneN(l)} von ${shopItems(l).length} gekauft)` : `Artikel (${shopItems(l).length})`),
+        shopItems(l).map((i) => h('div', { class: 'shi done static' + (i.done ? '' : ' skipped') }, i.done ? icon('check', { size: 18 }) : h('span', { class: 'muted', title: 'nicht gekauft' }, '–'), h('span', { class: 'shi-n' }, i.name), i.qty ? h('span', { class: 'tchip plain' }, i.qty) : null, i.price !== '' && i.price != null ? h('span', { class: 'muted small' }, fmtEUR(i.price)) : null))),
       h('section', { class: 'card' }, h('h3', {}, 'Beleg'),
         rec.length ? h('div', { class: 'attlist' }, rec.map((d) => h('div', { class: 'att' },
           h('button', { type: 'button', class: 'att-open', onclick: () => openDoc(d) }, docIcon(d.mime), h('span', { class: 'att-n' }, d.name)),
@@ -1356,7 +1366,7 @@ function viewShop() {
     return h('article', { class: 'card entry', onclick: () => shopDoneDetail(l.id) },
       h('div', { class: 'entry-top' }, h('span', { class: 'muted small' }, fmtDate(l.closedAt || l.created)), rec ? chip(`Beleg (${rec})`, 'done') : chip('Beleg fehlt', 'sub-open')),
       h('div', { class: 'split' }, h('h3', { class: 'dn-t' }, logoEl(l.store, 22), l.title), tot ? h('strong', { class: 'amount' }, (l.costId ? '' : 'ca. ') + fmtEUR(tot)) : null),
-      h('div', { class: 'muted small' }, [l.store, `${shopItems(l).length} Artikel`, l.costId ? 'in Kosten erfasst' : ''].filter(Boolean).join(' · ')));
+      h('div', { class: 'muted small' }, [l.store, shopDoneN(l) < shopItems(l).length ? `${shopDoneN(l)} von ${shopItems(l).length} gekauft` : `${shopItems(l).length} Artikel`, l.costId ? 'in Kosten erfasst' : ''].filter(Boolean).join(' · ')));
   };
   return h('div', { class: 'view' }, tabs,
     shopTab === 'offen'
