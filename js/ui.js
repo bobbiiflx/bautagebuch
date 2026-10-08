@@ -1907,6 +1907,7 @@ function viewShop() {
 
 const todoF = { phase: new Set(), who: new Set(), due: new Set() };
 let todoGroup = false;
+const todoClosed = new Set();
 const DUE_LABELS = { late: 'Überfällig', today: 'Heute', week: 'Diese Woche', later: 'Später', none: 'Ohne Datum' };
 function dueKey(t) {
   if (!t.due) return 'none';
@@ -1947,15 +1948,36 @@ function viewTodos() {
     h('button', { type: 'button', class: 'pill small fpill' + (todoGroup ? ' on' : ''), 'aria-pressed': String(todoGroup), onclick: () => { todoGroup = !todoGroup; render(); } }, icon('layers', { size: 18 }), ' Nach Gewerk'));
   const free = open.filter((t) => !blockedBy(t).length), blocked = open.filter((t) => blockedBy(t).length);
   const groups = (list) => {
-    if (!todoGroup) return [h('div', { class: 'card' }, list.map((t) => todoRow(t)))];
+    if (!todoGroup) {
+      return ['late', 'today', 'week', 'later', 'none'].filter((k) => list.some((t) => dueKey(t) === k)).map((k) => {
+        const l = list.filter((t) => dueKey(t) === k), closed = todoClosed.has(k);
+        return h('div', { class: 'card tsec tsec-' + k + (closed ? ' closed' : '') },
+          h('button', { type: 'button', class: 'sub tsec-h', 'aria-expanded': String(!closed), onclick: () => { closed ? todoClosed.delete(k) : todoClosed.add(k); render(); } },
+            icon(closed ? 'expand_more' : 'expand_less', { size: 18 }), h('span', {}, DUE_LABELS[k]), h('span', { class: 'muted small' }, String(l.length))),
+          closed ? null : l.map((t) => todoRow(t)));
+      });
+    }
     const m = new Map();
     list.forEach((t) => { const k = t.phaseId || ''; if (!m.has(k)) m.set(k, []); m.get(k).push(t); });
     return [...m.entries()].map(([k, l]) => h('div', { class: 'card' }, h('div', { class: 'sub' }, k ? phaseIcon({ id: k }, { size: 16 }) : null, ' ' + (k ? phaseName(k) : 'Ohne Gewerk')), l.map((t) => todoRow(t, false))));
   };
+  const qin = h('input', { type: 'text', class: 'todo-add', placeholder: 'Neue Aufgabe …', enterkeyhint: 'done', autocomplete: 'off', autocapitalize: 'sentences', 'aria-label': 'Neue Aufgabe' });
+  const recent = h('div', { class: 'qrecent' });
+  const qadd = h('form', { class: 'qadd', onsubmit: async (ev) => {
+    ev.preventDefault();
+    const title = qin.value.trim();
+    if (!title) return;
+    qin.value = '';
+    const ph = todoF.phase.size === 1 ? [...todoF.phase][0] : '';
+    const mine = me && todoF.who.size === 1 && norm([...todoF.who][0]) === norm(me) ? me : '';
+    const rec = await Store.save('todos', { title, due: '', assignee: mine, phaseId: ph, note: '', done: false, after: [] });
+    recent.append(h('div', { class: 'qrow' }, icon('check', { size: 16 }), h('span', {}, rec.title)));
+    qin.focus();
+  } }, qin, h('button', { type: 'submit', class: 'icon-btn small', 'aria-label': 'Hinzufügen' }, icon('add', { size: 22 })));
   return h(
     'div',
     { class: 'view' },
-    head, fbar,
+    head, qadd, recent, fbar,
     free.length ? groups(free) : (openAll.length ? empty('Nichts gefunden', 'Mit diesen Filtern gibt es keine offenen Aufgaben.', 'task_alt') : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.', 'task_alt')),
     blocked.length ? h('div', { class: 'card' }, h('div', { class: 'sub' }, icon('lock', { size: 16 }), ' Wartet auf Vorgänger'), blocked.map((t) => todoRow(t))) : null,
     done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, icon(showDone ? 'expand_less' : 'expand_more', { size: 20 }), ` Erledigt (${done.length})`) : null,
@@ -2905,6 +2927,7 @@ export function render() {
   const r = route();
   // In den Einstellungen nicht neu zeichnen, während gerade getippt wird (z. B. der Freigabe-Link).
   const ae = document.activeElement;
+  if (r === 'aufgaben' && ae?.classList?.contains('todo-add')) { renderAfterClose = true; return; }
   if (r === 'einkauf' && ae?.classList?.contains('shop-add')) { renderAfterClose = true; return; } // Tastatur offen lassen
   if (r === 'einstellungen' && mainEl.contains(ae) && ['INPUT', 'TEXTAREA'].includes(ae.tagName)) { renderAfterClose = true; return; }
   const y = window.scrollY;
