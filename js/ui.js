@@ -432,13 +432,30 @@ function viewHome() {
 }
 
 // ---------- Ansicht: Tagebuch ----------
+// Mehrfachauswahl Firmen (Chips + Eingabe mit Vorschlägen)
+function companyPicker(initial = []) {
+  const names = [...initial];
+  const chips = h('div', { class: 'dc-chips cpick' });
+  const inp = h('input', { type: 'text', list: 'firmen-dl', placeholder: 'Firma hinzufügen', autocomplete: 'off' });
+  const add = () => {
+    const v = inp.value.trim();
+    if (v && !names.some((n) => norm(n) === norm(v))) names.push(companyOf(v)?.name || v);
+    inp.value = ''; paint();
+  };
+  const paint = () => chips.replaceChildren(...names.map((n, i) => h('button', { type: 'button', class: 'tchip plain', 'aria-label': n + ' entfernen', onclick: () => { names.splice(i, 1); paint(); } }, n, ' ', icon('close', { size: 14 }))));
+  inp.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); add(); } });
+  inp.addEventListener('change', add);
+  paint();
+  return { el: h('div', {}, h('div', { class: 'row' }, inp, h('button', { type: 'button', class: 'btn small', onclick: add }, 'Hinzufügen')), chips), get: () => { add(); return names; } };
+}
 function diaryForm(entry) {
   const e = entry || { date: today(), title: '', text: '', phaseId: '', who: '', photos: [] };
   const date = h('input', { type: 'date', required: true, value: e.date });
   const title = h('input', { type: 'text', required: true, placeholder: 'z. B. Container gestellt', value: e.title });
   const text = h('textarea', { rows: 6, placeholder: 'Was ist passiert? Wer war da? Was wurde besprochen?', value: e.text || '' });
   const phase = phaseSelect(e.phaseId);
-  const who = h('input', { type: 'text', placeholder: 'Firma / Handwerker', value: e.who || '' });
+  const who = h('input', { type: 'text', placeholder: 'Personen, z. B. Bauleiter, Nachbar', value: e.who || '' });
+  const comps = companyPicker(e.companies || []);
   const pf = photoField(e.photos);
   const sk = sketchField(e.sketches || [], () => pf.ids);
   // Wetter automatisch zum Datum (Ort aus den Einstellungen), bleibt am Eintrag gespeichert
@@ -459,9 +476,11 @@ function diaryForm(entry) {
   paintWx();
   date.addEventListener('change', () => loadWx(false));
   if (!entry || !e.weather) loadWx(false);
-  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Wetter', wxBox), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Wer war da?', who), pf.el, sk.el], {
+  sheet(entry ? 'Eintrag bearbeiten' : 'Neuer Eintrag', [field('Datum', date), field('Wetter', wxBox), field('Titel', title), field('Notizen', text), field('Phase', phase), field('Firmen vor Ort', comps.el), field('Weitere Personen', who), pf.el, sk.el], {
     onSave: async () => {
-      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), weather: wx, photos: pf.ids, sketches: sk.refs });
+      const cl = comps.get();
+      for (const n of cl) await ensureCompany(n, phase.value);
+      await Store.save('diary', { ...e, date: date.value, title: title.value.trim(), text: text.value.trim(), phaseId: phase.value, who: who.value.trim(), companies: cl, weather: wx, photos: pf.ids, sketches: sk.refs });
       await pf.commit();
       await sk.commit();
     },
@@ -472,7 +491,7 @@ function diaryForm(entry) {
 
 // ---------- Ansicht: Tagebuch ----------
 // Wochenleiste mit Heute-Linie, farbige Karten je Gewerk, Detailbereich (Tablet) bzw. Detailblatt (Handy)
-const dv = { range: 'week', anchor: today(), day: '', fphase: new Set(), fwho: new Set(), group: 'day', sel: '' };
+const dv = { range: 'week', anchor: today(), day: '', fphase: new Set(), fwho: new Set(), fcomp: new Set(), group: 'day', sel: '' };
 const isoOf = (d) => d.toLocaleDateString('sv-SE');
 const dateOf = (iso) => new Date(iso + 'T12:00:00');
 const addDays = (iso, n) => { const d = dateOf(iso); d.setDate(d.getDate() + n); return isoOf(d); };
@@ -487,6 +506,7 @@ function phaseColor(id) {
   const k = i >= 0 ? i : [...id].reduce((a, c) => a + c.charCodeAt(0), 0);
   return `hsl(${HUES[k % HUES.length]} 62% 52%)`;
 }
+const compList = (d) => [...new Map([...(d.companies || []), ...whoList(d).filter((w) => companyOf(w))].map((n) => [norm(n), companyOf(n)?.name || n])).values()];
 const whoList = (d) => String(d.who || '').split(/\s*(?:,|;| und | & )\s*/).map((x) => x.trim()).filter(Boolean);
 const initials = (n) => n.split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
 const avatar = (n) => h('span', { class: 'avatar', title: n, style: { background: `hsl(${[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 48%)` } }, initials(n));
@@ -513,6 +533,7 @@ function diaryDetail(d, onEdit) {
       tasks.length ? h('div', { class: 'muted small center' }, `${doneT} von ${tasks.length} Aufgaben erledigt`) : null),
     h('section', { class: 'card dlist' },
       row('Gewerk', d.phaseId ? h('span', { class: 'tchip' }, phaseName(d.phaseId)) : h('span', { class: 'muted' }, '–')),
+      compList(d).length ? row('Firmen', h('span', { class: 'dc-chips' }, compList(d).map((n) => { const co = companyOf(n); return h(co ? 'button' : 'span', co ? { type: 'button', class: 'tchip', onclick: () => companyDetail(co) } : { class: 'tchip plain' }, n); }))) : null,
       row('Dabei', who.length ? h('span', { class: 'avs' }, who.map(avatar), h('span', { class: 'muted small' }, who.join(', '))) : h('span', { class: 'muted' }, '–')),
       row('Wetter', d.weather ? h('span', { class: 'wx-s' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 20 }), ' ' + Wx.summary(d.weather)) : h('span', { class: 'muted' }, '–'))),
     d.text && h('section', { class: 'card' }, h('h3', {}, 'Notizen'), h('p', { class: 'dtext' }, d.text)),
@@ -548,8 +569,9 @@ function viewDiary() {
     if (dv.range === 'month') return (d.date || '').slice(0, 7) === dv.anchor.slice(0, 7);
     return true;
   };
+  const compAll = [...new Map(all.flatMap(compList).map((n) => [norm(n), n])).values()].sort((a, b) => a.localeCompare(b, 'de'));
   const whoAll = [...new Set(all.flatMap(whoList))].sort((a, b) => a.localeCompare(b, 'de'));
-  const list = all.filter((d) => inRange(d) && (!dv.fphase.size || dv.fphase.has(d.phaseId)) && (!dv.fwho.size || whoList(d).some((w) => [...dv.fwho].some((x) => x.toLowerCase() === w.toLowerCase())))).sort(byDateDesc);
+  const list = all.filter((d) => inRange(d) && (!dv.fphase.size || dv.fphase.has(d.phaseId)) && (!dv.fcomp.size || compList(d).some((n) => [...dv.fcomp].some((x) => norm(x) === norm(n)))) && (!dv.fwho.size || whoList(d).some((w) => [...dv.fwho].some((x) => x.toLowerCase() === w.toLowerCase())))).sort(byDateDesc);
   if (wide && !list.some((d) => d.id === dv.sel)) dv.sel = list[0]?.id || '';
   const set = (patch) => { Object.assign(dv, patch); render(); };
 
@@ -575,6 +597,7 @@ function viewDiary() {
   const rangeTabs = h('div', { class: 'seg' }, [['week', 'Woche'], ['month', 'Monat'], ['all', 'Alle']].map(([k, t]) => h('button', { class: 'pill' + (dv.range === k && !dv.day ? ' on' : ''), onclick: () => set({ range: k, day: '' }) }, t)));
   const filters = filterBar(dv, [
     { title: 'Gewerk', key: 'fphase', items: phases().map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
+    { title: 'Firma', key: 'fcomp', items: compAll.map((w) => ({ v: w, t: w, icon: icon('contacts', { size: 22 }) })) },
     { title: 'Person', key: 'fwho', items: whoAll.map((w) => ({ v: w, t: w, icon: icon('groups', { size: 22 }) })) },
   ], h('button', { type: 'button', class: 'pill small fpill' + (dv.group === 'phase' ? ' on' : ''), 'aria-pressed': String(dv.group === 'phase'), onclick: () => set({ group: dv.group === 'phase' ? 'day' : 'phase' }) }, icon('layers', { size: 18 }), ' Nach Gewerk'));
 
@@ -586,7 +609,7 @@ function viewDiary() {
       h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dv.group === 'phase' ? dLong(d.date) : null), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
       h('h3', {}, d.title),
       d.text && h('p', { class: 'clamp' }, d.text),
-      h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), who.slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), who.length > 2 && h('span', { class: 'tchip plain' }, `+${who.length - 2}`)),
+      h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), [...compList(d), ...who.filter((w) => !companyOf(w))].slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), compList(d).length + who.filter((w) => !companyOf(w)).length > 2 && h('span', { class: 'tchip plain' }, `+${compList(d).length + who.filter((w) => !companyOf(w)).length - 2}`)),
       h('div', { class: 'dc-foot' },
         ph ? h('div', { class: 'dc-prog' }, h('div', { class: 'bar' }, h('div', { class: 'bar-fill', style: { width: ph.progress + '%', background: 'var(--pc)' } })), h('span', { class: 'muted small' }, ph.progress + '%')) : h('span'),
         h('span', { class: 'dc-ic' }, d.sketches?.length ? h('span', { class: 'phs' }, icon('draw', { size: 18 }), String(d.sketches.length)) : null, d.photos?.length ? h('span', { class: 'phs' }, icon('image', { size: 18 }), String(d.photos.length)) : null)));
@@ -629,13 +652,13 @@ const docsOfCost = (c) => (c.docIds || []).map((id) => Store.get('documents', id
 const costsOfDoc = (d) => Store.all('costs').filter((c) => (c.docIds || []).includes(d.id));
 
 // Datei direkt als Dokument anlegen (oder bei identischem Inhalt das vorhandene verwenden)
-async function quickAddDoc(file, { cat, phaseId = '', tags = [], note = '', name = '' }) {
+async function quickAddDoc(file, { cat, phaseId = '', tags = [], note = '', name = '', vendor = '' }) {
   const hash = await Store.fileHash(file);
   const twin = await Store.findDuplicate(hash, file);
   if (twin) { toast(`„${twin.name}“ gab es schon – wird verknüpft.`); return { doc: Store.get('documents', twin.id) || twin, created: false }; }
   const id = Store.uid();
   const info = await Store.addDocumentFile(file, cat, id);
-  const doc = await Store.save('documents', { id, name: name || file.name.replace(/\.[^.]+$/, ''), category: cat, tags, pinned: false, phaseId, note, date: today(), hash, ...info });
+  const doc = await Store.save('documents', { id, name: name || file.name.replace(/\.[^.]+$/, ''), category: cat, tags, pinned: false, phaseId, vendor, note, date: today(), hash, ...info });
   ensurePreview(doc, true);
   return { doc, created: true };
 }
@@ -722,7 +745,7 @@ function costForm(entry, preset) {
   status.addEventListener('change', syncPay); syncPay();
   const note = h('textarea', { rows: 3, value: e.note || '' });
   const pf = photoField(e.photos);
-  const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [] }));
+  const da = docAttachField(e.docIds || [], () => ({ cat: costDocCat(status.value), phaseId: phase.value, tags: vendor.value.trim() ? [vendor.value.trim()] : [], vendor: vendor.value.trim() }));
   sheet(entry ? 'Kosten bearbeiten' : 'Neue Kosten', [field('Datum', date), field('Bezeichnung', title), field('Betrag (EUR, brutto)', amount), field('Firma', vendor), field('Gewerk', phase), field('Status', status, '„Budgetangebot“ ist eine Alternative zum Durchrechnen. Sie zählt weder in den Kosten noch bei den Angeboten.'), payBox, partWrap, splitEl, h('label', { class: 'check' }, subOn, h('span', {}, 'Enthält Förderung')), subBox, field('Notiz', note), pf.el, da.el], {
     onSave: async () => {
       const saved = await Store.save('costs', { ...e, date: date.value, title: title.value.trim(), amount: Number(amount.value), vendor: vendor.value.trim(), phaseId: phase.value, status: status.value, dueDate: status.value === 'offen' ? dueIn.value : '', skontoPct: status.value === 'offen' ? Number(skPct.value) || 0 : 0, skontoUntil: status.value === 'offen' ? skUntil.value : '', paidDate: status.value === 'bezahlt' ? (e.paidDate || (e.status === 'bezahlt' ? '' : today())) : '', offerId: !['angebot', 'budgetangebot'].includes(status.value) && isPart.checked ? offerSel.value : '', note: note.value.trim(), subsidy: subOn.checked, subsidyAmount: subOn.checked ? Number(subAmt.value) || 0 : 0, subsidyPaid: subOn.checked && subPaid.checked, photos: pf.ids, docIds: da.ids });
@@ -733,6 +756,7 @@ function costForm(entry, preset) {
         const patch = {};
         if (['Angebote', 'Rechnungen'].includes(docCat(d)) && docCat(d) !== costDocCat(saved.status)) patch.category = costDocCat(saved.status);
         if (!d.phaseId && saved.phaseId) patch.phaseId = saved.phaseId;
+        if (!d.vendor && saved.vendor) patch.vendor = saved.vendor;
         if (Object.keys(patch).length) await Store.save('documents', { ...d, ...patch });
       }
     },
@@ -1054,7 +1078,7 @@ function searchAll(q) {
     const hay = norm(texts(x).filter(Boolean).join(' · '));
     if (terms.every((t) => hay.includes(t))) rows.push({ type, label, icn, x, title: title(x), sub: sub(x), open: () => open(x), date: x.date || '' });
   });
-  add('diary', 'Tagebuch', 'menu_book', Store.all('diary'), (x) => [x.title, x.text, x.who, phaseName(x.phaseId)], (x) => x.title, (x) => [fmtDate(x.date), x.who].filter(Boolean).join(' · '), diaryForm);
+  add('diary', 'Tagebuch', 'menu_book', Store.all('diary'), (x) => [x.title, x.text, x.who, ...(x.companies || []), phaseName(x.phaseId)], (x) => x.title, (x) => [fmtDate(x.date), x.who].filter(Boolean).join(' · '), diaryForm);
   add('companies', 'Firmen', 'contacts', companies(), (x) => [x.name, x.contact, x.phone, x.email, x.note, phaseName(x.trade)], (x) => x.name, (x) => [phaseName(x.trade), x.phone].filter(Boolean).join(' · '), companyDetail);
   add('costs', 'Kosten', 'payments', Store.all('costs'), (x) => [x.title, x.vendor, x.note, phaseName(x.phaseId)], (x) => `${x.title} · ${fmtEUR(x.amount)}`, (x) => [x.vendor, phaseName(x.phaseId), fmtDate(x.date)].filter(Boolean).join(' · '), costForm);
   add('defects', 'Mängel', 'warning', Store.all('defects'), (x) => [x.title, x.description, x.room, phaseName(x.phaseId)], (x) => x.title, (x) => [x.room, phaseName(x.phaseId)].filter(Boolean).join(' · '), defectForm);
@@ -1923,6 +1947,7 @@ function docFields(init) {
   const cat = h('select', {}, DOC_CATEGORIES.map((c) => h('option', { value: c }, c)));
   cat.value = init.category || 'Sonstiges';
   const phase = usageSelect(init.phaseId || '');
+  const vendor = vendorInput(init.vendor, 'Firma (optional)');
   const tags = h('input', { type: 'text', list: 'doctags', placeholder: 'z. B. Statik, Bad (mit Komma trennen)', value: (init.tags || []).join(', ') });
   const dl = h('datalist', { id: 'doctags' }, allDocTags().map((t) => h('option', { value: t })));
   const box = h('div', {});
@@ -1946,7 +1971,7 @@ function docFields(init) {
         } }, 'Übernehmen'),
         h('button', { type: 'button', class: 'btn-text small', onclick: () => { dismissed = key; box.replaceChildren(); } }, 'Ignorieren'))));
   };
-  return { cat, phase, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk', phase), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
+  return { cat, phase, vendor, tags, offer, els: [box, field('Kategorie', cat), field('Gewerk', phase), field('Firma', vendor), field('Tags', tags, 'Zusätzliche Schlagworte, auch eigene.'), dl] };
 }
 
 // Datei-Eingaben liegen dauerhaft im Dokument (nicht in der Ansicht): Beim Öffnen der Kamera kann die Ansicht neu zeichnen,
@@ -2014,7 +2039,8 @@ function docAddForm({ files = [], mode = 'upload' } = {}) {
         else if (!(await askConfirm('Die Datei wird dann doppelt gespeichert. Trotzdem?', 'Doppelt speichern'))) return false;
       }
       if (!info) info = await Store.addDocumentFile(out, f.cat.value, id);
-      const saved = await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, hash, ...info });
+      const saved = await Store.save('documents', { id, name: nm, category: f.cat.value, tags: parseTags(f.tags.value), pinned: false, phaseId: f.phase.value, vendor: f.vendor.value.trim(), note: note.value.trim(), date: today(), pages: mode === 'photo' ? shots.length : undefined, hash, ...info });
+      await ensureCompany(saved.vendor, saved.phaseId);
       ensurePreview(saved, true); // im Hintergrund: PNG der ersten PDF-Seite
     },
     onCancel: () => urls.forEach((u) => URL.revokeObjectURL(u)),
@@ -2023,21 +2049,21 @@ function docAddForm({ files = [], mode = 'upload' } = {}) {
 
 function docEditForm(d) {
   const name = h('input', { type: 'text', required: true, value: d.name });
-  const f = docFields({ category: docCat(d), phaseId: d.phaseId, tags: d.tags });
+  const f = docFields({ category: docCat(d), phaseId: d.phaseId, tags: d.tags, vendor: d.vendor });
   const note = h('textarea', { rows: 3, value: d.note || '' });
   const pin = h('input', { type: 'checkbox', role: 'switch', checked: !!d.pinned });
   f.offer(d.fileName || d.name, d.mime);
   const links = costsOfDoc(d);
   sheet('Dokument', [h('p', { class: 'muted small' }, `${fmtSize(d.size || 0)} · ${fmtDate(d.date)}${d.fileName ? ' · ' + d.fileName : ''}`), ...links.map((c) => h('button', { type: 'button', class: 'btn block', onclick: () => costForm(c) }, icon('receipt_long', { size: 20 }), ` Verknüpft mit Kosten: ${c.title}`)), field('Bezeichnung', name), ...f.els, h('label', { class: 'switch-row' }, h('span', {}, 'Oben anpinnen'), pin), field('Notiz', note), h('button', { type: 'button', class: 'btn block', onclick: () => openDoc(d) }, 'Öffnen')], {
-    onSave: () => Store.save('documents', { ...d, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: pin.checked, phaseId: f.phase.value, note: note.value.trim() }),
+    onSave: async () => { await Store.save('documents', { ...d, name: name.value.trim(), category: f.cat.value, tags: parseTags(f.tags.value), pinned: pin.checked, phaseId: f.phase.value, vendor: f.vendor.value.trim(), note: note.value.trim() }); await ensureCompany(f.vendor.value, f.phase.value); },
     onDelete: () => Store.remove('documents', d.id),
   });
 }
 
 // Filterleiste der Dokumente: Kategorie, Gewerk, Tag (je mit Mehrfachauswahl) und Angepinnt – die Filter gelten gemeinsam
-const docF = { cat: new Set(), phase: new Set(), tag: new Set(), pin: false };
+const docF = { cat: new Set(), phase: new Set(), tag: new Set(), vendor: new Set(), pin: false };
 const CAT_ICONS = { 'Verträge': 'edit_note', 'Pläne': 'straighten', 'Rechnungen': 'receipt_long', 'Angebote': 'request_quote', 'Genehmigungen': 'task_alt', 'Fotos': 'photo_camera', 'Sonstiges': 'attach_file' };
-const docMatches = (d, f) => (!f.cat.size || f.cat.has(docCat(d))) && (!f.phase.size || f.phase.has(d.phaseId)) && (!f.tag.size || (d.tags || []).some((t) => f.tag.has(t))) && (!f.pin || d.pinned);
+const docMatches = (d, f) => (!f.cat.size || f.cat.has(docCat(d))) && (!f.phase.size || f.phase.has(d.phaseId)) && (!f.tag.size || (d.tags || []).some((t) => f.tag.has(t))) && (!f.vendor.size || [...f.vendor].some((v) => norm(v) === norm(d.vendor))) && (!f.pin || d.pinned);
 
 // Filtermaske: Kategorien, Gewerke und Tags in einem Blatt (Mehrfachauswahl, mit Icons). Erst „Anwenden“ übernimmt die Auswahl.
 // Filter-Maske (Mehrfachauswahl, Anwenden/Abbrechen). F = Objekt aus Sets, sections = [{title, key, items:[{v,t,icon}]}]
@@ -2065,7 +2091,7 @@ function filterBar(F, sections, ...extra) {
     n ? h('button', { type: 'button', class: 'btn-text small', onclick: () => { sections.forEach((x) => F[x.key].clear()); render(); } }, 'Zurücksetzen') : null);
 }
 function docFilterSheet(opts) {
-  filterSheet(docF, [{ title: 'Kategorie', key: 'cat', items: opts.cats }, { title: 'Gewerk', key: 'phase', items: opts.phases }, { title: 'Tags', key: 'tag', items: opts.tags }]);
+  filterSheet(docF, [{ title: 'Kategorie', key: 'cat', items: opts.cats }, { title: 'Gewerk', key: 'phase', items: opts.phases }, { title: 'Firma', key: 'vendor', items: opts.vendors }, { title: 'Tags', key: 'tag', items: opts.tags }]);
 }
 
 // Rechnungs-Fotos aus „Kosten“ erscheinen verlinkt (ohne Kopie) in den Dokumenten
@@ -2073,7 +2099,7 @@ function costDocs() {
   const out = [];
   for (const c of Store.all('costs')) {
     const ph = c.photos || [];
-    ph.forEach((id, i) => out.push({ id: `cost:${c.id}:${id}`, virtual: true, costId: c.id, name: c.title + (ph.length > 1 ? ` (${i + 1}/${ph.length})` : ''), category: costDocCat(c.status), tags: c.vendor ? [c.vendor] : [], phaseId: c.phaseId, date: c.date, mime: 'image/jpeg', path: Store.photoPaths(id).full, fileName: `${c.title}.jpg` }));
+    ph.forEach((id, i) => out.push({ id: `cost:${c.id}:${id}`, virtual: true, costId: c.id, name: c.title + (ph.length > 1 ? ` (${i + 1}/${ph.length})` : ''), category: costDocCat(c.status), tags: c.vendor ? [c.vendor] : [], vendor: c.vendor, phaseId: c.phaseId, date: c.date, mime: 'image/jpeg', path: Store.photoPaths(id).full, fileName: `${c.title}.jpg` }));
   }
   return out;
 }
@@ -2083,13 +2109,15 @@ function viewDocs() {
   const list = all.filter((d) => docMatches(d, docF));
   const pinned = list.filter((d) => d.pinned), rest = list.filter((d) => !d.pinned);
   const set = (patch) => { Object.assign(docF, patch); render(); };
-  const count = docF.cat.size + docF.phase.size + docF.tag.size;
+  const count = docF.cat.size + docF.phase.size + docF.tag.size + docF.vendor.size;
   const active = count || docF.pin;
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
   const tagIds = [...new Set(all.flatMap((d) => d.tags || []))].sort((a, b) => a.localeCompare(b, 'de'));
+  const vendorNames = [...new Map(all.filter((d) => d.vendor).map((d) => [norm(d.vendor), d.vendor])).values()].sort((a, b) => a.localeCompare(b, 'de'));
   const row = (d) => {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),
+      d.vendor && !(d.tags || []).some((t) => norm(t) === norm(d.vendor)) ? h('span', { class: 'tchip plain' }, d.vendor) : null,
       ...(d.tags || []).map((t) => h('span', { class: 'tchip plain' }, '#' + t)),
       d.virtual && h('span', { class: 'tchip plain' }, 'aus Kosten'),
       !d.virtual && costsOfDoc(d).length ? h('span', { class: 'tchip plain' }, 'Kosten') : null,
@@ -2108,10 +2136,11 @@ function viewDocs() {
       h('button', { type: 'button', class: 'pill small fpill' + (count ? ' on' : ''), onclick: () => docFilterSheet({
         cats: DOC_CATEGORIES.map((c) => ({ v: c, t: c, icon: icon(CAT_ICONS[c] || 'folder', { size: 22 }) })),
         phases: phaseIds.map((id) => ({ v: id, t: phaseName(id), icon: phaseIcon({ id }, { size: 22 }) })),
+        vendors: vendorNames.map((v) => ({ v, t: v, icon: icon('contacts', { size: 22 }) })),
         tags: tagIds.map((t) => ({ v: t, t: '#' + t, icon: icon('sell', { size: 22 }) })),
       }) }, icon('tune', { size: 18 }), ' Filter', count ? h('span', { class: 'fcount' }, String(count)) : null),
       h('button', { class: 'pill small' + (docF.pin ? ' on' : ''), 'aria-pressed': String(docF.pin), onclick: () => set({ pin: !docF.pin }) }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt'),
-      active ? h('button', { class: 'btn-text small', onclick: () => { docF.cat.clear(); docF.phase.clear(); docF.tag.clear(); docF.pin = false; render(); } }, 'Zurücksetzen') : null),
+      active ? h('button', { class: 'btn-text small', onclick: () => { docF.cat.clear(); docF.phase.clear(); docF.tag.clear(); docF.vendor.clear(); docF.pin = false; render(); } }, 'Zurücksetzen') : null),
     list.length
       ? [pinned.length && rest.length ? h('div', { class: 'sub' }, icon('push_pin', { size: 16, filled: true }), ' Angepinnt') : null,
          pinned.length ? h('div', { class: 'card' }, pinned.map(row)) : null,
@@ -2250,6 +2279,8 @@ function companyForm(entry) {
       if (entry && norm(entry.name) !== norm(nm)) {
         for (const c of Store.all('costs')) if (norm(c.vendor) === norm(entry.name)) await Store.save('costs', { ...c, vendor: nm });
         for (const d of Store.all('defects')) if (norm(d.vendor) === norm(entry.name)) await Store.save('defects', { ...d, vendor: nm });
+        for (const d of Store.all('documents')) if (norm(d.vendor) === norm(entry.name)) await Store.save('documents', { ...d, vendor: nm });
+        for (const d of Store.all('diary')) if ((d.companies || []).some((n) => norm(n) === norm(entry.name))) await Store.save('diary', { ...d, companies: d.companies.map((n) => (norm(n) === norm(entry.name) ? nm : n)) });
       }
     },
     onDelete: entry && (async () => { await Store.remove('settings', e.id); }),
@@ -2264,6 +2295,12 @@ function companyDetail(co) {
   const defRow = (d) => h('button', { type: 'button', class: 'ovi', onclick: () => defectForm(d) },
     h('span', { class: 'ovit' }, h('span', {}, d.title), h('span', { class: 'muted small' }, [fmtDate(d.date), d.room].filter(Boolean).join(' · '))),
     chip(DEFECT_STATES.find((x) => x[0] === d.status)?.[1] || d.status, 'ds-' + d.status));
+  const myDocs = [...new Map([...Store.all('documents').filter((d) => norm(d.vendor) === norm(co.name)), ...st.costs.flatMap(docsOfCost)].map((d) => [d.id, d])).values()];
+  const myDiary = Store.all('diary').filter((d) => compList(d).some((n) => norm(n) === norm(co.name))).sort(byDateDesc);
+  const docRow = (d) => h('button', { type: 'button', class: 'ovi', onclick: () => { dlg.close(); docEditForm(d); } },
+    h('span', { class: 'ovit' }, h('span', {}, d.name), h('span', { class: 'muted small' }, [docCat(d), fmtDate(d.date)].filter(Boolean).join(' · '))), icon('chevron_right', { size: 20 }));
+  const diaRow = (d) => h('button', { type: 'button', class: 'ovi', onclick: () => { dlg.close(); openDiaryDetail(d); } },
+    h('span', { class: 'ovit' }, h('span', {}, d.title), h('span', { class: 'muted small' }, [fmtDate(d.date), phaseName(d.phaseId)].filter(Boolean).join(' · '))), icon('chevron_right', { size: 20 }));
   const group = (title, list, row) => list.length ? h('section', { class: 'cdg' }, h('h3', {}, title, h('span', { class: 'muted small' }, ` · ${list.length}`)), h('div', { class: 'ovlist cd' }, list.map(row))) : null;
   const offerBlock = st.offers.length ? h('section', { class: 'cdg' }, h('h3', {}, 'Angebote', h('span', { class: 'muted small' }, ` · ${st.offers.length}`)),
     ...st.offers.map((o) => h('div', { class: 'cdo' }, costRow(o), offerSplit(o).ps.length ? offerBar(o) : null))) : null;
@@ -2280,7 +2317,9 @@ function companyDetail(co) {
     group('Rechnungen', st.inv, costRow),
     group('Budgetangebote', st.budget, costRow),
     group('Mängel', st.defects, defRow),
-    !st.costs.length && !st.defects.length ? h('p', { class: 'muted small' }, 'Noch keine Angebote, Rechnungen oder Mängel mit dem Namen „' + co.name + '“.') : null,
+    group('Dokumente', myDocs, docRow),
+    group('Tagebuch', myDiary, diaRow),
+    !st.costs.length && !st.defects.length && !myDocs.length && !myDiary.length ? h('p', { class: 'muted small' }, 'Noch keine Angebote, Rechnungen oder Mängel mit dem Namen „' + co.name + '“.') : null,
     co.note ? h('p', { class: 'clamp3' }, co.note) : null);
   dlg = sheet(co.name, body, { noSave: true });
 }

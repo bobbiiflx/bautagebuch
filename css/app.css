@@ -728,3 +728,5 @@ input, select, textarea { font-size: max(16px, 1em); }
 .ovlist.cd { padding-left: 0; }
 .cdr { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
 .clamp3 { white-space: pre-line; }
+.cpick { margin-top: 8px; } .cpick:empty { display: none; }
+.row > .btn.small { flex: 0 0 auto; }

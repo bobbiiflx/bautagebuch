@@ -441,8 +441,8 @@ export async function loadDemo() {
   const today = new Date();
   const d = (n) => new Date(today.getTime() - n * 864e5).toISOString().slice(0, 10);
   const demo = { demo: true };
-  await save('diary', { ...demo, date: d(2), title: 'Container gestellt', text: 'Der 10-m³-Container steht vor dem Haus. Entkernung im Keller beginnt morgen.', phaseId: 'entkernung', photos: [] });
-  await save('diary', { ...demo, date: d(5), title: 'Öltank leergepumpt', text: 'Tank wurde fachgerecht entleert, Entsorgungsnachweis liegt bei.', phaseId: 'oeltank', photos: [] });
+  await save('diary', { ...demo, date: d(2), title: 'Container gestellt', text: 'Der 10-m³-Container steht vor dem Haus. Entkernung im Keller beginnt morgen.', phaseId: 'entkernung', companies: ['Abbruch Becker'], photos: [] });
+  await save('diary', { ...demo, date: d(5), title: 'Öltank leergepumpt', text: 'Tank wurde fachgerecht entleert, Entsorgungsnachweis liegt bei.', phaseId: 'oeltank', companies: ['Entsorgung Nord'], photos: [] });
   await save('defects', { ...demo, date: d(1), title: 'Riss im Kellerboden', description: 'Haarriss neben der Heizungsnische, bitte vor dem Estrich prüfen.', room: 'KG – Heizung/Technik', phaseId: 'estrich', status: 'offen', due: '', photos: [] });
   await save('todos', { ...demo, title: 'Angebote für Fenster einholen', due: d(-7), done: false, assignee: '', phaseId: 'fenster' });
   const oel = get('phases', 'oeltank');
