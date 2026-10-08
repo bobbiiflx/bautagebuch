@@ -611,3 +611,5 @@ input[type=checkbox]:not([role=switch]):focus-visible { outline: 2px solid var(-
 .stchip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .stchosen { display: flex; align-items: center; gap: 4px; min-height: 22px; }
 .dn-t { display: flex; align-items: center; gap: 8px; }
+
+.sheet-save { margin-top: 6px; }

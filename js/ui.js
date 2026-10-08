@@ -83,7 +83,7 @@ export function askConfirm(text, okLabel = 'Ja') {
   });
 }
 
-export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, onCancel, noSave } = {}) {
+export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, onCancel, noSave, bottomSave } = {}) {
   const dlg = h('dialog', { class: 'sheet' });
   const form = h(
     'form',
@@ -108,12 +108,13 @@ export function sheet(title, body, { onSave, saveLabel = 'Speichern', onDelete, 
       { class: 'sheet-head' },
       h('button', { type: 'button', class: 'btn-text', onclick: () => { onCancel?.(); dlg.close(); } }, noSave ? 'Schließen' : 'Abbrechen'),
       h('h2', {}, title),
-      noSave ? h('span') : h('button', { type: 'submit', class: 'btn-text strong' }, saveLabel)
+      noSave || bottomSave ? h('span') : h('button', { type: 'submit', class: 'btn-text strong' }, saveLabel)
     ),
     h(
       'div',
       { class: 'sheet-body' },
       body,
+      bottomSave && h('button', { type: 'submit', class: 'btn primary block sheet-save' }, saveLabel),
       onDelete &&
         h('button', {
           type: 'button',
@@ -1154,6 +1155,8 @@ function shopListForm(list) {
     field('Wo wird eingekauft?', h('div', { class: 'stpick' }, chips, more, own, chosen)),
     field('Name des Zettels', title),
     field('Gewerk / Verwendung (optional)', phase)], {
+    bottomSave: true,
+    saveLabel: list ? 'Speichern' : 'Zettel anlegen',
     onSave: () => Store.save('shopping', { ...e, title: title.value.trim() || store || 'Einkaufszettel', store, phaseId: phase.value }),
     onDelete: list && (() => Store.remove('shopping', e.id)),
   });
