@@ -510,10 +510,11 @@ function phaseColor(id) {
 let swipeOpen = null;
 const resetSwipe = (w) => { w.classList.remove('open'); const c = w.lastChild; c.style.transition = 'transform .2s ease'; c.style.transform = ''; };
 const closeSwipe = () => { if (swipeOpen) { resetSwipe(swipeOpen); swipeOpen = null; } };
-function swipeDel(card, doDelete, label = 'Löschen') {
+function swipeDel(card, doDelete, right = null, label = 'Löschen') {
   const W = 92;
   const act = h('button', { type: 'button', class: 'sw-del', 'aria-label': label }, icon('delete', { size: 24 }), h('span', {}, label));
-  const wrap = h('div', { class: 'sw' }, act, card);
+  const ract = right && h('div', { class: 'sw-act ' + (right.cls || '') }, icon(right.icon, { size: 24 }), h('span', {}, right.label));
+  const wrap = h('div', { class: 'sw' }, ract, act, card);
   let x0 = 0, y0 = 0, dx = 0, mode = '', base = 0, moved = false, pid = null;
   const setX = (v, anim) => { card.style.transition = anim ? 'transform .2s ease' : 'none'; card.style.transform = v ? `translateX(${v}px)` : ''; };
   wrap.addEventListener('pointerdown', (e) => {
@@ -530,13 +531,15 @@ function swipeDel(card, doDelete, label = 'Löschen') {
       if (Math.abs(mx) > 10 && Math.abs(mx) > Math.abs(my) * 1.5) { mode = 'h'; try { wrap.setPointerCapture(pid); } catch {} } else return;
     }
     moved = true;
-    dx = Math.max(-W - 24, Math.min(0, base + mx));
+    dx = Math.max(-W - 24, Math.min(right ? W + 24 : 0, base + mx));
     setX(dx, false);
+    if (ract) ract.classList.toggle('on', dx > 70);
   });
   const end = (e) => {
     if (e.pointerId !== pid) return;
     pid = null;
     if (mode !== 'h') return;
+    if (right && dx > 70) { setX(0, true); wrap.classList.remove('open'); if (ract) ract.classList.remove('on'); Promise.resolve(right.run()).catch(() => toast('Aktion fehlgeschlagen.')); return; }
     const open = dx < -W * 0.5;
     setX(open ? -W : 0, true);
     wrap.classList.toggle('open', open);
@@ -1270,7 +1273,7 @@ function viewCosts() {
             c.subsidy && h('div', {}, chip(`Förderung ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`, c.subsidyPaid ? 'done' : 'sub-open')),
             docsOfCost(c).length ? h('div', { class: 'att-chips' }, docsOfCost(c).map((d) => h('button', { type: 'button', class: 'tchip plain attc', onclick: (ev) => { ev.stopPropagation(); openDoc(d); } }, icon('attach_file', { size: 14 }), ' ' + d.name))) : null,
             photoStrip(c.photos)
-          ), () => Store.remove('costs', c.id))
+          ), () => Store.remove('costs', c.id), c.status === 'offen' ? { label: 'Bezahlt', icon: 'check', cls: 'ok', run: () => markPaid(c) } : null)
         )
       : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.', 'payments'),
   ];
@@ -1500,7 +1503,7 @@ function viewDefects() {
             h('div', { class: 'muted small' }, [d.room, d.vendor, d.due && 'Frist ' + fmtDate(d.due)].filter(Boolean).join(' · ')),
             d.description && h('p', { class: 'clamp' }, d.description),
             photoStrip(d.photos)
-          ), () => Store.remove('defects', d.id))
+          ), () => Store.remove('defects', d.id), (() => { const act = isActiveDefect(d); return { label: act ? 'Behoben' : 'Wieder offen', icon: act ? 'check' : 'undo', cls: act ? 'ok' : '', run: () => Store.save('defects', { ...d, status: act ? 'behoben' : 'offen' }) }; })())
         )
       : empty('Keine Mängel in dieser Ansicht', 'Halte Mängel mit Foto, Ort und Frist fest, bevor Handwerker abziehen.', 'warning'),
     fab(() => defectForm())
@@ -1568,7 +1571,7 @@ function todoForm(entry, presetPhase = '') {
 }
 
 // Eine Aufgabenzeile (Aufgaben- und Planungsansicht)
-const todoRow = (t, withPhase = true) => swipeDel(todoRowBody(t, withPhase), () => deleteTodo(t));
+const todoRow = (t, withPhase = true) => swipeDel(todoRowBody(t, withPhase), () => deleteTodo(t), { label: t.done ? 'Wieder offen' : 'Erledigt', icon: t.done ? 'undo' : 'check', cls: t.done ? '' : 'ok', run: () => toggleTodo(t, !t.done) });
 function todoRowBody(t, withPhase = true) {
   const wait = blockedBy(t);
   const nSucc = t.done ? 0 : successors(t).filter((x) => !x.done).length;
@@ -2366,7 +2369,7 @@ function viewDocs() {
   const phaseIds = [...new Set(all.map((d) => d.phaseId).filter(Boolean))];
   const tagIds = [...new Set(all.flatMap((d) => d.tags || []))].sort((a, b) => a.localeCompare(b, 'de'));
   const vendorNames = [...new Map(all.filter((d) => d.vendor).map((d) => [norm(d.vendor), d.vendor])).values()].sort((a, b) => a.localeCompare(b, 'de'));
-  const row = (d) => (d.virtual ? rowBody(d) : swipeDel(rowBody(d), () => Store.remove('documents', d.id)));
+  const row = (d) => (d.virtual ? rowBody(d) : swipeDel(rowBody(d), () => Store.remove('documents', d.id), { label: d.pinned ? 'Lösen' : 'Anheften', icon: 'push_pin', cls: '', run: () => Store.save('documents', { ...d, pinned: !d.pinned }) }));
   const rowBody = (d) => {
     const chips = [h('span', { class: 'tchip plain' }, docCat(d)),
       d.phaseId && h('span', { class: 'tchip', style: { '--pc': phaseColor(d.phaseId) } }, phaseName(d.phaseId)),

@@ -812,3 +812,6 @@ input, select, textarea { font-size: max(16px, 1em); }
 .sw-del { position: absolute; top: 0; right: 0; bottom: 0; width: 92px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--bad); color: #fff; border: 0; font-size: 12px; font-weight: 600; }
 .sw > .todo, .sw > .doc { background: var(--card); }
 .card > .sw, .ph-todo-list > .sw { border-radius: 0; }
+.sw-act { position: absolute; top: 0; left: 0; bottom: 0; width: 120px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; background: var(--accent, #3b5bdb); color: #fff; font-size: 12px; font-weight: 600; opacity: .85; transition: opacity .15s; }
+.sw-act.ok { background: var(--ok, #1f9d63); }
+.sw-act.on { opacity: 1; }
