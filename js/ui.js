@@ -370,6 +370,21 @@ function quickTiles() {
     h('button', { type: 'button', class: 'btn-text small qedit', onclick: quickForm }, icon('edit', { size: 16 }), ' Anpassen'));
 }
 
+// Kosten in klein für die Startseite: gleicher Aufbau wie der Überblick in „Kosten“
+function costMini(budget) {
+  const real = Store.all('costs').filter((c) => !isOffer(c));
+  const paid = sum(real.filter((c) => c.status === 'bezahlt'), (c) => c.amount), open = sum(real.filter((c) => c.status === 'offen'), (c) => c.amount);
+  const sub = sum(real.filter((c) => c.subsidy && c.subsidyPaid), (c) => c.subsidyAmount);
+  const net = paid + open - sub;
+  return h('section', { class: 'card ov mini', role: 'link', onclick: () => go('kosten') },
+    h('div', { class: 'split' }, h('h3', {}, 'Kosten'), h('strong', { class: 'amount' }, fmtEUR(paid + open))),
+    paid + open > 0
+      ? [stackBar([{ label: 'Bezahlt', value: paid, color: 'var(--viz-3)' }, { label: 'Rechnung offen', value: open, color: 'var(--viz-2)' }], paid + open),
+        h('div', { class: 'offtxt' }, h('span', {}, h('b', {}, fmtEUR(paid)), ' bezahlt'), h('span', {}, h('b', {}, fmtEUR(open)), ' offen')),
+        budget ? h('div', { class: 'muted small' }, net <= budget ? `${fmtEUR(budget - net)} vom Budget übrig` : `Budget um ${fmtEUR(net - budget)} überschritten`) : null]
+      : h('p', { class: 'muted small' }, 'Noch keine Rechnungen eingetragen.'));
+}
+
 function viewHome() {
   const ph = phases();
   const pct = progressOf(ph);
@@ -397,14 +412,10 @@ function viewHome() {
       !running.length && next && h('div', { class: 'muted small' }, `Als Nächstes geplant: ${next.name}`)
     ),
     quickTiles(),
-    h(
-      'div',
-      { class: 'stats' },
-      stat('Kosten (Rechnungen)', fmtEUR(spent), budget ? `von ${fmtEUR(budget)} Budget` : 'Budget unter „Kosten“ festlegen', budget && spent > budget ? 'bad' : ''),
-      stat('Offene Rechnungen', fmtEUR(open)),
+    costMini(budget),
+    h('div', { class: 'stats' },
       stat('Offene Mängel', String(defects.length), defects.length ? 'siehe Mängel' : 'alles gut', defects.length ? 'warn' : ''),
-      stat('Offene Aufgaben', String(todos.length))
-    ),
+      stat('Offene Aufgaben', String(todos.length))),
     todos.length
       ? card('Nächste Aufgaben', todos.slice(0, 4).map((t) => h('div', { class: 'line' }, h('span', {}, t.title), t.due && h('span', { class: 'muted small' }, fmtDate(t.due)))))
       : null,
@@ -569,7 +580,7 @@ function viewDiary() {
     const who = whoList(d);
     const sel = wide && dv.sel === d.id;
     return h('article', { class: 'card dcard' + (sel ? ' sel' : ''), style: { '--pc': phaseColor(d.phaseId) }, tabindex: 0, onclick: () => { if (wide) set({ sel: d.id }); else openDiaryDetail(d); }, onkeydown: (e) => { if (e.key === 'Enter') e.currentTarget.click(); } },
-      h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dLong(d.date)), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
+      h('div', { class: 'dc-top' }, h('span', { class: 'muted small' }, dv.group === 'phase' ? dLong(d.date) : null), d.weather && h('span', { class: 'wx-s muted small' }, icon(Wx.describe(d.weather.code).icon, { filled: true, size: 18 }), ` ${Math.round(d.weather.tmax)}°`)),
       h('h3', {}, d.title),
       d.text && h('p', { class: 'clamp' }, d.text),
       h('div', { class: 'dc-chips' }, d.phaseId && h('span', { class: 'tchip' }, phaseName(d.phaseId)), who.slice(0, 2).map((w) => h('span', { class: 'tchip plain' }, w)), who.length > 2 && h('span', { class: 'tchip plain' }, `+${who.length - 2}`)),
@@ -579,7 +590,7 @@ function viewDiary() {
   };
 
   let body;
-  if (!list.length) body = empty(all.length ? 'Keine Einträge in dieser Auswahl' : 'Noch keine Einträge', all.length ? 'Wähle eine andere Woche, einen anderen Zeitraum oder entferne die Filter.' : 'Halte fest, was auf der Baustelle passiert – mit Fotos.');
+  if (!list.length) body = empty(all.length ? 'Keine Einträge in dieser Auswahl' : 'Noch keine Einträge', all.length ? 'Wähle eine andere Woche, einen anderen Zeitraum oder entferne die Filter.' : 'Halte fest, was auf der Baustelle passiert – mit Fotos.', 'menu_book');
   else {
     const groups = new Map();
     for (const d of list) { const k = dv.group === 'phase' ? (d.phaseId || '') : d.date; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); }
@@ -951,7 +962,7 @@ function viewCosts() {
             photoStrip(c.photos)
           )
         )
-      : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.'),
+      : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.', 'payments'),
   ];
   return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? summary : invoices, fab(() => costForm()));
 }
@@ -982,8 +993,8 @@ function viewSearch() {
   const paint = () => {
     searchQ = input.value;
     const rows = searchAll(searchQ);
-    if (!searchQ.trim()) return out.replaceChildren(empty('Alles durchsuchen', 'Tippe einen Begriff – gesucht wird in Tagebuch, Kosten, Mängeln, Aufgaben, Dokumenten und Planung.'));
-    if (!rows.length) return out.replaceChildren(empty('Nichts gefunden', 'Probiere einen anderen Begriff.'));
+    if (!searchQ.trim()) return out.replaceChildren(empty('Alles durchsuchen', 'Tippe einen Begriff – gesucht wird in Tagebuch, Kosten, Mängeln, Aufgaben, Dokumenten und Planung.', 'search'));
+    if (!rows.length) return out.replaceChildren(empty('Nichts gefunden', 'Probiere einen anderen Begriff.', 'search'));
     out.replaceChildren(h('p', { class: 'muted small' }, `${rows.length} Treffer`), h('div', { class: 'card' }, rows.slice(0, 80).map((r) => h('div', { class: 'hit', onclick: r.open }, icon(r.icn, { size: 22 }), h('div', { class: 'hit-t' }, h('div', {}, r.title), h('div', { class: 'muted small' }, [r.label, r.sub].filter(Boolean).join(' · ')))))));
   };
   input.addEventListener('input', paint);
@@ -1082,7 +1093,7 @@ function downloadPlan(L, plan) {
 const openLoans = new Set();
 function viewFinance() {
   const list = loans();
-  if (!list.length) return h('div', { class: 'view' }, empty('Noch kein Darlehen', 'Lege Darlehen mit Zins, Tilgung, Sondertilgung und Auszahlung an – die App rechnet den Tilgungsplan.'), fab(() => loanForm()));
+  if (!list.length) return h('div', { class: 'view' }, empty('Noch kein Darlehen', 'Lege Darlehen mit Zins, Tilgung, Sondertilgung und Auszahlung an – die App rechnet den Tilgungsplan.', 'account_balance'), fab(() => loanForm()));
   const res = list.map((L) => ({ L, r: Fin.summarize(L) }));
   const plans = res.map((x) => x.r.plan);
   const total = sum(list, (L) => L.amount);
@@ -1178,7 +1189,7 @@ function viewDefects() {
             photoStrip(d.photos)
           )
         )
-      : empty('Keine Mängel in dieser Ansicht', 'Halte Mängel mit Foto, Ort und Frist fest, bevor Handwerker abziehen.'),
+      : empty('Keine Mängel in dieser Ansicht', 'Halte Mängel mit Foto, Ort und Frist fest, bevor Handwerker abziehen.', 'warning'),
     fab(() => defectForm())
   );
 }
@@ -1250,11 +1261,11 @@ function todoRow(t, withPhase = true) {
   const late = !t.done && t.due && preds(t).some((p) => !p.done && p.due && p.due > t.due);
   return h(
     'div',
-    { class: 'todo' + (t.done ? ' done' : '') + (wait.length ? ' blocked' : '') },
-    h('input', { type: 'checkbox', checked: t.done, 'aria-label': 'Erledigt', onchange: (e) => toggleTodo(t, e.target.checked) }),
+    { class: 'todo' + (t.done ? ' done' : '') + (wait.length ? ' blocked' : ''), role: 'button', tabindex: 0, 'aria-pressed': String(!!t.done), onclick: () => toggleTodo(t, !t.done), onkeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleTodo(t, !t.done); } } },
+    h('span', { class: 'todo-chk' }, t.done ? icon('check', { size: 20 }) : null),
     h(
       'div',
-      { class: 'todo-t', onclick: () => todoForm(t) },
+      { class: 'todo-t' },
       h('div', {}, t.title),
       h('div', { class: 'muted small' }, [t.due && (t.due < today() && !t.done ? 'überfällig · ' : '') + fmtDate(t.due), t.assignee, withPhase && phaseName(t.phaseId)].filter(Boolean).join(' · ')),
       wait.length || nSucc || late
@@ -1266,7 +1277,8 @@ function todoRow(t, withPhase = true) {
             late ? h('span', { class: 'dep warn' }, icon('warning', { size: 14 }), 'Fällig vor Vorgänger') : null
           )
         : null
-    )
+    ),
+    h('button', { type: 'button', class: 'icon-btn small', 'aria-label': 'Bearbeiten', onclick: (e) => { e.stopPropagation(); todoForm(t); } }, icon('edit', { size: 20 }))
   );
 }
 
@@ -1549,8 +1561,8 @@ function viewShop() {
   };
   return h('div', { class: 'view' }, tabs,
     shopTab === 'offen'
-      ? (open.length ? open.map(shopCard) : empty('Kein Einkaufszettel', 'Lege einen Zettel pro Baumarkt oder Händler an und hake die Produkte unterwegs ab.'))
-      : (done.length ? done.map(doneCard) : empty('Noch nichts erledigt', 'Sobald alle Produkte eines Zettels abgehakt sind, landet er hier – mit Platz für den Beleg.')),
+      ? (open.length ? open.map(shopCard) : empty('Kein Einkaufszettel', 'Lege einen Zettel pro Baumarkt oder Händler an und hake die Produkte unterwegs ab.', 'shopping_cart'))
+      : (done.length ? done.map(doneCard) : empty('Noch nichts erledigt', 'Sobald alle Produkte eines Zettels abgehakt sind, landet er hier – mit Platz für den Beleg.', 'task_alt')),
     shopTab === 'offen' ? fab(() => shopListForm()) : null);
 }
 
@@ -1561,7 +1573,7 @@ function viewTodos() {
   return h(
     'div',
     { class: 'view' },
-    open.length ? h('div', { class: 'card' }, open.filter((t) => !blockedBy(t).length).map((t) => todoRow(t))) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.'),
+    open.length ? h('div', { class: 'card' }, open.filter((t) => !blockedBy(t).length).map((t) => todoRow(t))) : empty('Alles erledigt', 'Hier landen Aufgaben für euch beide.', 'task_alt'),
     open.some((t) => blockedBy(t).length) ? h('div', { class: 'card' }, h('div', { class: 'sub' }, icon('lock', { size: 16 }), ' Wartet auf Vorgänger'), open.filter((t) => blockedBy(t).length).map((t) => todoRow(t))) : null,
     done.length ? h('button', { class: 'btn-text', onclick: () => { showDone = !showDone; render(); } }, icon(showDone ? 'expand_less' : 'expand_more', { size: 20 }), ` Erledigt (${done.length})`) : null,
     showDone && done.length ? h('div', { class: 'card' }, done.map((t) => todoRow(t))) : null,
@@ -1672,11 +1684,10 @@ function phaseForm(entry) {
 const openPhases = new Set();
 function phaseTodos(p) {
   const list = todosOf(p.id).sort((a, b) => Number(a.done) - Number(b.done) || (a.due || '9999').localeCompare(b.due || '9999'));
-  if (!list.length) return h('div', { class: 'ph-todos' }, h('button', { class: 'btn-text small', onclick: () => todoForm(null, p.id) }, icon('add', { size: 18 }), ' Aufgabe'));
   const isOpen = openPhases.has(p.id);
   const done = list.filter((t) => t.done).length;
   return h('div', { class: 'ph-todos' },
-    h('button', { class: 'btn-text small', 'aria-expanded': String(isOpen), onclick: () => { isOpen ? openPhases.delete(p.id) : openPhases.add(p.id); render(); } }, icon(isOpen ? 'expand_less' : 'expand_more', { size: 20 }), ` Aufgaben ${done}/${list.length}`),
+    h('button', { class: 'btn-text small', 'aria-expanded': String(isOpen), onclick: () => { isOpen ? openPhases.delete(p.id) : openPhases.add(p.id); render(); } }, icon(isOpen ? 'expand_less' : 'expand_more', { size: 20 }), list.length ? ` Aufgaben ${done}/${list.length}` : ' Aufgaben'),
     isOpen && h('div', { class: 'ph-todo-list' }, list.map((t) => todoRow(t, false)), h('button', { class: 'btn-text small', onclick: () => todoForm(null, p.id) }, icon('add', { size: 18 }), ' Aufgabe hinzufügen'))
   );
 }
@@ -2028,10 +2039,13 @@ function viewDocs() {
          pinned.length ? h('div', { class: 'card' }, pinned.map(row)) : null,
          pinned.length && rest.length ? h('div', { class: 'sub' }, 'Weitere') : null,
          rest.length ? h('div', { class: 'card' }, rest.map(row)) : null]
-      : empty('Keine Dokumente', active ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.'),
-    h('div', { class: 'fab-pair' },
-      h('button', { class: 'fab-x alt', onclick: () => pickFiles('up', (fs) => docAddForm({ files: fs, mode: 'upload' })) }, icon('upload_file', { size: 22 }), ' Hochladen'),
-      h('button', { class: 'fab-x', onclick: () => pickFiles('cam', (fs) => docAddForm({ files: fs, mode: 'photo' })) }, icon('photo_camera', { size: 22 }), ' Foto machen'))
+      : empty('Keine Dokumente', active ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Verträge, Pläne, Rechnungen und Genehmigungen – alles liegt in eurem OneDrive-Ordner.', 'folder_open'),
+    (() => {
+      const menu = h('div', { class: 'fab-menu', hidden: true },
+        h('button', { class: 'fab-x alt', onclick: () => { menu.hidden = true; pickFiles('up', (fs) => docAddForm({ files: fs, mode: 'upload' })); } }, icon('upload_file', { size: 22 }), ' Hochladen'),
+        h('button', { class: 'fab-x', onclick: () => { menu.hidden = true; pickFiles('cam', (fs) => docAddForm({ files: fs, mode: 'photo' })); } }, icon('photo_camera', { size: 22 }), ' Foto machen'));
+      return h('div', {}, menu, fab(() => { menu.hidden = !menu.hidden; }));
+    })()
   );
 }
 
@@ -2236,14 +2250,14 @@ function viewSettings() {
           dlBlob(`bautagebuch-vollsicherung-${today()}.zip`, r.blob);
           toast(`Vollsicherung erstellt (${r.files} Dateien${r.missing ? `, ${r.missing} nicht verfügbar` : ''}).`, 6000);
         } catch (err) { toast('Sicherung fehlgeschlagen: ' + (err.message || err), 7000); }
-        b.disabled = false; b.textContent = 'Vollsicherung herunterladen (ZIP mit Fotos)';
-      } }, 'Vollsicherung herunterladen (ZIP mit Fotos)'),
-      h('button', { class: 'btn block', onclick: () => download(`bautagebuch-sicherung-${today()}.json`, JSON.stringify(Store.exportAll(), null, 2)) }, 'Nur Daten herunterladen (JSON, ohne Fotos)'),
-      h('button', { class: 'btn block', onclick: () => restoreIn.click() }, icon('restart_alt', { size: 20 }), ' Sicherung wiederherstellen …'),
+        b.disabled = false; b.replaceChildren(icon('download', { size: 20 }), ' Vollsicherung (ZIP)');
+      } }, icon('download', { size: 20 }), ' Vollsicherung (ZIP)'),
+      h('button', { class: 'btn block', onclick: () => download(`bautagebuch-sicherung-${today()}.json`, JSON.stringify(Store.exportAll(), null, 2)) }, icon('download', { size: 20 }), ' Nur Daten (JSON)'),
+      h('button', { class: 'btn block', onclick: () => restoreIn.click() }, icon('restart_alt', { size: 20 }), ' Sicherung wiederherstellen'),
       restoreIn,
       demoCount
-        ? h('button', { class: 'btn block', onclick: async () => { await Store.removeDemo(); toast('Beispieldaten entfernt.'); } }, `Beispieldaten entfernen (${demoCount})`)
-        : h('button', { class: 'btn block', onclick: async () => { await Store.loadDemo(); await loadDemoCosts(); toast('Beispieldaten geladen.'); } }, 'Beispieldaten zum Ausprobieren laden'),
+        ? h('button', { class: 'btn block', onclick: async () => { await Store.removeDemo(); toast('Beispieldaten entfernt.'); } }, icon('delete', { size: 20 }), ` Beispieldaten entfernen (${demoCount})`)
+        : h('button', { class: 'btn block', onclick: async () => { await Store.loadDemo(); await loadDemoCosts(); toast('Beispieldaten geladen.'); } }, icon('table_chart', { size: 20 }), ' Beispieldaten laden'),
       h('p', { class: 'muted small' }, 'Die Vollsicherung enthält alle Einträge samt Fotos, Dokumenten und Handschrift; die JSON-Datei nur die Texte und Zahlen. Beispieldaten sind markiert und lassen sich jederzeit mit einem Tipp entfernen. Sobald OneDrive verbunden ist, werden auch sie hochgeladen – bitte vorher entfernen.')
     ),
     h('p', { class: 'muted small center' }, `Bautagebuch ${CONFIG.version}`)
@@ -2259,7 +2273,7 @@ async function switchTarget(t) {
 }
 
 // ---------- Gemeinsame Bausteine ----------
-const empty = (title, text) => h('div', { class: 'empty' }, h('div', { class: 'empty-i' }, icon('construction', { size: 40 })), h('strong', {}, title), h('p', { class: 'muted' }, text));
+const empty = (title, text, ic = 'construction') => h('div', { class: 'empty' }, h('div', { class: 'empty-i' }, icon(ic, { size: 40 })), h('strong', {}, title), h('p', { class: 'muted' }, text));
 const fab = (fn) => h('button', { class: 'fab', 'aria-label': 'Hinzufügen', onclick: fn }, icon('add', { size: 28 }));
 
 function syncBadge() {

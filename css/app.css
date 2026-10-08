@@ -681,3 +681,13 @@ input, select, textarea { font-size: max(16px, 1em); }
 .ovnet > span { display: flex; flex-direction: column; }
 
 .cs-offen, .chip.warn { background: var(--chip-warn-bg); color: var(--chip-warn-fg); }
+
+/* Aufgaben: Zeile antippen = erledigen */
+.todo { cursor: pointer; align-items: center; }
+.todo-chk { width: 22px; height: 22px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--accent); }
+.todo-t { cursor: inherit; min-width: 0; }
+.ov.mini { cursor: pointer; gap: 6px; }
+
+/* Dokumente: ein Plus-Button, Auswahl klappt darüber auf */
+.fab-menu { position: fixed; right: 18px; bottom: calc(var(--tab) + env(safe-area-inset-bottom) + 88px); z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
+.fab-menu[hidden] { display: none; }
