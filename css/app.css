@@ -764,3 +764,24 @@ input, select, textarea { font-size: max(16px, 1em); }
 #report .rp-t th:nth-child(5), #report .rp-t td:nth-child(5) { width: 84px; }
 #report .rp-t th, #report .rp-t td { padding: 5px 3px; overflow-wrap: anywhere; }
 @media (min-width: 600px) { #report .rp-t { font-size: 13px; } #report .rp-t th:nth-child(4), #report .rp-t td:nth-child(4) { width: 130px; } #report .rp-t th:nth-child(2), #report .rp-t td:nth-child(2) { width: 90px; } }
+
+/* Zeitleiste */
+.tl { padding: 12px 12px 8px; overflow: hidden; }
+.tl-axis { position: relative; height: 18px; font-size: 11px; color: var(--muted, #667); }
+.tl-axis span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
+.tl-body { position: relative; }
+.tl-grid i { position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; opacity: .12; }
+.tl-today { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed var(--bad, #d33); z-index: 2; pointer-events: none; }
+.tl-today b { position: absolute; top: -17px; left: 0; transform: translateX(-50%); font-size: 10px; background: var(--bad, #d33); color: #fff; padding: 1px 5px; border-radius: 8px; font-weight: 600; }
+.tl-row { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 7px 0 5px; color: inherit; font: inherit; position: relative; z-index: 1; }
+.tl-lab { display: flex; flex-direction: column; gap: 0; margin-bottom: 3px; }
+.tl-n { font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 4px; }
+.tl-track { position: relative; height: 14px; }
+.tl-bar { position: absolute; top: 2px; height: 10px; border-radius: 5px; background: color-mix(in srgb, var(--pc) 28%, transparent); overflow: hidden; }
+.tl-bar i { display: block; height: 100%; background: var(--pc); border-radius: 5px; }
+.tl-pct { position: absolute; top: 0; font-size: 10px; color: var(--muted, #667); padding: 0 4px; line-height: 14px; }
+.tl-row[class~=late] .tl-bar { outline: 2px solid var(--bad, #d33); outline-offset: -1px; }
+.tl-row.done { opacity: .65; }
+.tl-un { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tl-axis span { transform: none; padding-left: 3px; }
+.tl-lab .muted { font-size: 12px; }

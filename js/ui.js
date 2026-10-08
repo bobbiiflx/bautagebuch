@@ -1881,14 +1881,54 @@ function phaseTodos(p) {
     isOpen && h('div', { class: 'ph-todo-list' }, list.map((t) => todoRow(t, false)), h('button', { class: 'btn-text small', onclick: () => todoForm(null, p.id) }, icon('add', { size: 18 }), ' Aufgabe hinzufügen'))
   );
 }
+// Zeitleiste: Phasen mit Start/Ende als Balken auf einer gemeinsamen Zeitachse (ohne Seitwärts-Scrollen)
+let planTab = 'liste';
+function planTimeline(list) {
+  const dated = list.filter((p) => p.start || p.end).map((p) => ({ p, s: p.start || p.end, e: p.end || p.start }));
+  const undated = list.filter((p) => !p.start && !p.end);
+  if (!dated.length) return [empty('Noch keine Termine', 'Trage bei den Phasen Start und Ende ein, dann erscheint hier die Zeitleiste.', 'calendar_month')];
+  const t0 = today();
+  const dayN = (iso) => { const [y, m, d] = iso.split('-').map(Number); return Math.round(Date.UTC(y, m - 1, d) / 864e5); };
+  const dateN = (n) => new Date(n * 864e5);
+  const min = Math.min(...dated.map((x) => dayN(x.s)), dayN(t0)), max = Math.max(...dated.map((x) => dayN(x.e)), dayN(t0));
+  const lo = min, span = Math.max(30, max - lo + 2);
+  const pos = (n) => ((n - lo) / span) * 100;
+  // Monatsmarken
+  const ticks = [];
+  const d0 = dateN(lo);
+  ticks.push({ x: 0, t: d0.toLocaleDateString('de-DE', { month: 'short', year: '2-digit', timeZone: 'UTC' }) });
+  for (let y = d0.getUTCFullYear(), m = d0.getUTCMonth() + 1; ; m++) {
+    const n = Math.round(Date.UTC(y, m, 1) / 864e5);
+    if (n > lo + span) break;
+    const dt = new Date(Date.UTC(y, m, 1));
+    ticks.push({ x: pos(n), t: dt.toLocaleDateString('de-DE', { month: 'short', timeZone: 'UTC' }) + (dt.getUTCMonth() === 0 ? ' ' + String(dt.getUTCFullYear()).slice(2) : '') });
+  }
+  const thin = ticks.length > 8 ? 2 : 1;
+  const todayX = pos(dayN(t0));
+  const rows = dated.sort((a, b) => a.s.localeCompare(b.s) || a.e.localeCompare(b.e)).map(({ p, s, e }) => {
+    const x = pos(dayN(s)), w = Math.max(1.5, pos(dayN(e) + 1) - x);
+    const late = e < t0 && p.state !== 'fertig' && p.progress < 100;
+    const col = phaseColor(p.id);
+    return h('button', { type: 'button', class: 'tl-row' + (late ? ' late' : '') + (p.state === 'fertig' ? ' done' : ''), onclick: () => phaseForm(p) },
+      h('div', { class: 'tl-lab' }, h('span', { class: 'tl-n' }, phaseIcon(p, { size: 16 }), ' ', p.name), h('span', { class: 'muted small' }, `${fmtDate(s)}${e !== s ? ' – ' + fmtDate(e) : ''}${late ? ' · überfällig' : ''}`)),
+      h('div', { class: 'tl-track' },
+        h('div', { class: 'tl-bar', style: { left: x + '%', width: w + '%', '--pc': col } }, h('i', { style: { width: Math.min(100, p.progress) + '%' } })),
+        h('span', { class: 'tl-pct', style: x + w > 82 ? { right: (100 - x) + '%' } : { left: (x + w) + '%' } }, p.progress + ' %')));
+  });
+  return [h('section', { class: 'card tl' },
+    h('div', { class: 'tl-axis' }, ticks.filter((_, i) => i % thin === 0).map((k) => h('span', { style: { left: k.x + '%' } }, k.t))),
+    h('div', { class: 'tl-body' }, h('div', { class: 'tl-grid' }, ticks.map((k) => h('i', { style: { left: k.x + '%' } }))), h('div', { class: 'tl-today', style: { left: todayX + '%' } }, h('b', {}, 'Heute')), rows)),
+    undated.length ? h('section', { class: 'card' }, h('h3', {}, 'Ohne Termine'), h('div', { class: 'tl-un' }, undated.map((p) => h('button', { type: 'button', class: 'tchip plain', onclick: () => phaseForm(p) }, p.name)))) : null];
+}
 function viewPlan() {
   const list = phases();
   const pct = progressOf(list);
   return h(
     'div',
     { class: 'view' },
+    h('div', { class: 'seg' }, [['liste', 'Liste'], ['zeit', 'Zeitleiste']].map(([k, t]) => h('button', { class: 'pill' + (planTab === k ? ' on' : ''), onclick: () => { planTab = k; render(); } }, t))),
     h('section', { class: 'card' }, h('div', { class: 'split' }, h('h3', {}, 'Gesamtfortschritt'), h('strong', {}, pct + ' %')), bar(pct), h('p', { class: 'muted small' }, 'Die Reihenfolge änderst du, indem du eine Phase am Griff nach oben oder unten ziehst. Erledigte Aufgaben erhöhen den Fortschritt bis 95 %, „Fertig“ (100 %) setzt du selbst.')),
-    list.map((p) =>
+    planTab === 'zeit' ? planTimeline(list) : list.map((p) =>
       h(
         'article',
         { class: 'card phase ps-' + p.state, 'data-id': p.id },
