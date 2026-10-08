@@ -838,7 +838,7 @@ function viewCosts() {
       { title: 'Gewerk / Verwendung', key: 'phase', items: usedUsage.map((p) => ({ v: p.id, t: p.name, icon: phaseIcon(p, { size: 22 }) })) },
     ]) }, icon('tune', { size: 18 }), ' Filter', fcount ? h('span', { class: 'fcount' }, String(fcount)) : null),
     fcount ? h('button', { class: 'btn-text small', onclick: () => { costFilter.phase.clear(); costFilter.status.clear(); render(); } }, 'Zurücksetzen') : null);
-  const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Rechnungen (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
+  const tabs = h('div', { class: 'seg' }, [['auswertung', 'Auswertung'], ['rechnungen', `Belege (${all.length})`]].map(([k, t]) => h('button', { class: 'pill' + (costTab === k ? ' on' : ''), onclick: () => { costTab = k; render(); } }, t)));
 
   const summary = [
     h('div', { class: 'stats' },
