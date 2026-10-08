@@ -509,7 +509,57 @@ function phaseColor(id) {
 const compList = (d) => [...new Map([...(d.companies || []), ...whoList(d).filter((w) => companyOf(w))].map((n) => [norm(n), companyOf(n)?.name || n])).values()];
 const whoList = (d) => String(d.who || '').split(/\s*(?:,|;| und | & )\s*/).map((x) => x.trim()).filter(Boolean);
 const initials = (n) => n.split(/\s+/).map((x) => x[0]).join('').slice(0, 2).toUpperCase();
-const avatar = (n) => h('span', { class: 'avatar', title: n, style: { background: `hsl(${[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 48%)` } }, initials(n));
+const profileOf = (name) => { const k = norm(name); return k ? Store.all('settings').find((x) => x.kind === 'profile' && norm(x.name) === k) || null : null; };
+const myName = () => localStorage.getItem('bt.name') || Auth.account()?.name || '';
+function avatar(n, size) {
+  const p = profileOf(n);
+  const st = size ? { width: size + 'px', height: size + 'px', fontSize: size * 0.36 + 'px' } : {};
+  if (p?.photo) return h('span', { class: 'avatar has-img', title: n, style: st }, h('img', { src: p.photo, alt: n }));
+  return h('span', { class: 'avatar', title: n, style: { ...st, background: `hsl(${[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % 360} 55% 48%)` } }, initials(n));
+}
+// Foto mittig quadratisch zuschneiden und auf 256 px verkleinern (JPEG, ca. 15–30 KB)
+async function resizeAvatar(file, px = 256) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch {
+    bmp = await new Promise((res, rej) => { const u = URL.createObjectURL(file); const im = new Image(); im.onload = () => { res(im); URL.revokeObjectURL(u); }; im.onerror = () => rej(new Error('Bild nicht lesbar')); im.src = u; });
+  }
+  const w = bmp.width || bmp.naturalWidth, hgt = bmp.height || bmp.naturalHeight, side = Math.min(w, hgt);
+  const c = document.createElement('canvas'); c.width = c.height = px;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, px, px);
+  ctx.drawImage(bmp, (w - side) / 2, (hgt - side) / 2, side, side, 0, 0, px, px);
+  bmp.close?.();
+  return c.toDataURL('image/jpeg', 0.86);
+}
+async function saveProfilePhoto(name, photo) {
+  const cur = profileOf(name);
+  if (!photo) { if (cur) await Store.remove('settings', cur.id); return; }
+  await Store.save('settings', { ...(cur || {}), id: cur?.id || 'profile-' + norm(name).replace(/\W+/g, '-'), kind: 'profile', name, photo });
+}
+function profileBox() {
+  const nameIn = h('input', { type: 'text', value: myName(), placeholder: 'Dein Name' });
+  const file = h('input', { type: 'file', accept: 'image/*', hidden: true });
+  const pic = h('button', { type: 'button', class: 'prof-pic', 'aria-label': 'Profilbild ändern', onclick: () => file.click() });
+  const rm = h('button', { type: 'button', class: 'btn-text small', onclick: async () => { await saveProfilePhoto(myName(), null); toast('Profilbild entfernt.'); } }, 'Entfernen');
+  const paint = () => { const n = myName(); pic.replaceChildren(n ? avatar(n, 76) : h('span', { class: 'avatar', style: { width: '76px', height: '76px', background: 'var(--muted)' } }, icon('contacts', { size: 36 })), h('span', { class: 'prof-edit' }, icon('edit', { size: 16 }))); rm.hidden = !profileOf(n)?.photo; };
+  nameIn.addEventListener('change', async () => {
+    const old = myName(), nn = nameIn.value.trim(), p = profileOf(old);
+    Store.setUserName(nn);
+    if (p && norm(p.name) !== norm(nn)) { await Store.remove('settings', p.id); if (nn) await saveProfilePhoto(nn, p.photo); }
+    toast('Name gespeichert.'); paint();
+  });
+  file.addEventListener('change', async () => {
+    nameIn.blur(); const f = file.files[0]; file.value = '';
+    if (!f) return;
+    if (!myName()) { toast('Bitte zuerst deinen Namen eintragen.'); nameIn.focus(); return; }
+    try { await saveProfilePhoto(myName(), await resizeAvatar(f)); toast('Profilbild gespeichert.'); }
+    catch (e) { toast('Bild konnte nicht verarbeitet werden.'); }
+  });
+  paint();
+  return h('div', { class: 'prof' }, pic, h('div', { class: 'prof-r' }, nameIn, h('div', { class: 'prof-b' }, h('button', { type: 'button', class: 'btn small', onclick: () => file.click() }, icon('photo_camera', { size: 18 }), ' Profilbild'), rm)), file);
+}
 const wideQ = matchMedia('(min-width: 960px)');
 wideQ.addEventListener?.('change', () => render());
 
@@ -2557,7 +2607,6 @@ function viewSettings() {
   const signed = Auth.isSignedIn();
   const acc = Auth.account();
   const target = Session.getTarget();
-  const name = h('input', { type: 'text', value: localStorage.getItem('bt.name') || acc?.name || '', placeholder: 'Dein Name', onchange: (e) => { Store.setUserName(e.target.value.trim()); toast('Name gespeichert.'); } });
   const link = h('input', { type: 'url', placeholder: 'Freigabe-Link aus OneDrive einfügen' });
   const restoreIn = h('input', { type: 'file', accept: '.zip,.json,application/zip,application/json', hidden: true, onchange: async (e) => {
     const f = e.target.files[0]; e.target.value = '';
@@ -2606,7 +2655,7 @@ function viewSettings() {
   return h(
     'div',
     { class: 'view' },
-    card('Dein Name', name, h('p', { class: 'muted small' }, 'Wird bei deinen Einträgen als Autor gespeichert.')),
+    card('Profil', profileBox(), h('p', { class: 'muted small' }, 'Name und Profilbild erscheinen bei deinen Einträgen. Das Foto wird automatisch quadratisch zugeschnitten und verkleinert.')),
     card('OneDrive', h('div', { class: 'syncline' }, syncBadge(), st.error && h('span', { class: 'muted small' }, st.error)), connectBox),
     card('Standort für das Wetter', locBox()),
     card('Darstellung', h('div', { class: 'seg' }, [['auto', 'Browser', 'settings'], ['light', 'Hell', 'light_mode'], ['dark', 'Dunkel', 'dark_mode']].map(([k, t, ic]) => h('button', { class: 'pill' + (getTheme() === k ? ' on' : ''), onclick: () => { setTheme(k); render(); } }, icon(ic, { size: 18 }), ' ', t))), h('p', { class: 'muted small' }, '„Browser“ folgt der Einstellung deines Geräts.')),
@@ -2697,7 +2746,7 @@ let root, headerSync, mainEl, menuBtn;
 function openMenu() {
   const r = route();
   const dlg = h('dialog', { class: 'drawer', 'aria-label': 'Menü' },
-    h('div', { class: 'drawer-head' }, h('strong', {}, 'Bautagebuch'), h('button', { class: 'icon-btn', 'aria-label': 'Menü schließen', onclick: () => dlg.close() }, icon('close', { size: 24 }))),
+    h('div', { class: 'drawer-head' }, myName() ? h('div', { class: 'dr-me' }, avatar(myName(), 40), h('div', {}, h('strong', {}, myName()), h('div', { class: 'muted small' }, 'Bautagebuch'))) : h('strong', {}, 'Bautagebuch'), h('button', { class: 'icon-btn', 'aria-label': 'Menü schließen', onclick: () => dlg.close() }, icon('close', { size: 24 }))),
     h('nav', { class: 'drawer-list' }, ALL.map(([k, ic, t]) => h('a', { href: '#/' + k, class: 'drawer-item' + (r === k ? ' on' : '') + (k === 'einstellungen' ? ' last' : ''), 'aria-current': r === k ? 'page' : null, onclick: navClick(k, () => dlg.close()) }, icon(ic, { filled: r === k, size: 24 }), h('span', {}, t)))));
   dlg.addEventListener('click', (e) => { if (e.target === dlg) dlg.close(); });
   dlg.addEventListener('close', () => dlg.remove());

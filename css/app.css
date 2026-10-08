@@ -785,3 +785,15 @@ input, select, textarea { font-size: max(16px, 1em); }
 .tl-un { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tl-axis span { transform: none; padding-left: 3px; }
 .tl-lab .muted { font-size: 12px; }
+
+/* Profil */
+.avatar.has-img { background: none; overflow: hidden; padding: 0; }
+.avatar.has-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.prof { display: flex; gap: 14px; align-items: center; }
+.prof-pic { position: relative; background: none; border: 0; padding: 0; border-radius: 99px; flex: 0 0 auto; }
+.prof-pic .avatar { display: grid; }
+.prof-edit { position: absolute; right: -2px; bottom: -2px; width: 26px; height: 26px; border-radius: 99px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; color: var(--ink); }
+.prof-r { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.prof-b { display: flex; gap: 8px; align-items: center; }
+.dr-me { display: flex; gap: 12px; align-items: center; min-width: 0; }
+.dr-me strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

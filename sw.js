@@ -1,6 +1,6 @@
 // Service Worker: hält die App-Dateien offline bereit. Daten laufen nie über den Cache
 // (die liegen im lokalen Speicher bzw. in OneDrive).
-const CACHE = 'bautagebuch-v62';
+const CACHE = 'bautagebuch-v63';
 const LOGOS = 'bautagebuch-logos'; // Markt-Logos (Bilder fremder Server), bleiben über App-Updates erhalten
 const isLogo = (u) => (u.hostname === 'www.google.com' && u.pathname.startsWith('/s2/favicons')) || u.hostname.endsWith('.gstatic.com') || u.hostname.endsWith('schulte-baustoffe.de');
 const SHELL = ['./', 'index.html', 'css/app.css', 'manifest.webmanifest', 'js/main.js', 'js/ui.js', 'js/store.js', 'js/auth.js', 'js/onedrive.js', 'js/session.js', 'js/phases.js', 'js/icons.js',
