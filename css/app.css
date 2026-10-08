@@ -803,3 +803,5 @@ input, select, textarea { font-size: max(16px, 1em); }
 .dd-head .byline { margin-top: 4px; }
 .dc-top { align-items: center; }
 .dc-top .byline { margin-left: auto; margin-right: 8px; }
+.dc-top .byline { margin: 0; }
+.dc-r { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
