@@ -567,7 +567,14 @@ function profileBox() {
 const wideQ = matchMedia('(min-width: 960px)');
 wideQ.addEventListener?.('change', () => render());
 
-const authorOf = (d) => { const n = d.createdBy || d.updatedBy || ''; return n && n !== 'Unbekannt' ? n : ''; };
+// Autor: createdBy, sonst letzter Bearbeiter. Ältere Einträge ohne Namen gehören bei nur einer Person im Tagebuch eindeutig ihr.
+const validAuthor = (n) => (n && n !== 'Unbekannt' ? n : '');
+const authorOf = (d) => {
+  const n = validAuthor(d.createdBy) || validAuthor(d.updatedBy);
+  if (n) return n;
+  const known = new Set(Store.all('diary').map((x) => validAuthor(x.createdBy) || validAuthor(x.updatedBy)).filter(Boolean));
+  return known.size <= 1 ? [...known][0] || myName() : '';
+};
 const byline = (d, size = 20) => { const n = authorOf(d); return n ? h('span', { class: 'byline', title: 'Eingetragen von ' + n }, avatar(n, size), h('span', { class: 'muted small' }, n.split(/\s+/)[0])) : null; };
 function diaryDetail(d, onEdit) {
   const ph = d.phaseId ? Store.get('phases', d.phaseId) : null;
