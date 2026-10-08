@@ -1012,6 +1012,93 @@ function costOverview(all, sums) {
   return box;
 }
 
+// ---------- Nachweis-Export (Bank / Förderung) ----------
+function proofRows(o) {
+  const inRange = (c) => (!o.from || (c.date || '') >= o.from) && (!o.to || (c.date || '') <= o.to);
+  let rows = Store.all('costs').filter((c) => !isOffer(c) && inRange(c));
+  if (o.scope === 'paid') rows = rows.filter((c) => c.status === 'bezahlt');
+  if (o.scope === 'sub') rows = rows.filter((c) => c.subsidy);
+  return rows.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+function proofCsv(o) {
+  const f = (n) => (Number(n) || 0).toFixed(2).replace('.', ',');
+  const head = ['Nr', 'Datum', 'Bezahlt am', 'Gewerk', 'Firma', 'Beschreibung', 'Status', 'Betrag', 'Förderfähig', 'Förderbetrag', 'Förderung ausgezahlt', 'Zu Angebot'];
+  const q = (t) => '"' + String(t ?? '').replace(/"/g, '""') + '"';
+  const rows = proofRows(o).map((c, i) => [i + 1, c.date, c.paidDate || '', q(phaseName(c.phaseId)), q(c.vendor), q(c.title), COST_STATES.find((x) => x[0] === c.status)?.[1] || c.status, f(c.amount), c.subsidy ? 'ja' : '', c.subsidy ? f(c.subsidyAmount) : '', c.subsidy ? (c.subsidyPaid ? 'ja' : 'nein') : '', q(Store.get('costs', c.offerId)?.title || '')]);
+  download(`nachweis-${today()}.csv`, '﻿' + [head, ...rows].map((r) => r.join(';')).join('\n'), 'text/csv');
+}
+async function proofReport(o) {
+  const rows = proofRows(o);
+  const groups = new Map();
+  rows.forEach((c) => { const k = c.phaseId || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); });
+  const total = sum(rows, (c) => c.amount), paid = sum(rows.filter((c) => c.status === 'bezahlt'), (c) => c.amount), openA = sum(rows.filter((c) => c.status === 'offen'), (c) => c.amount);
+  const subs = rows.filter((c) => c.subsidy);
+  const subAll = sum(subs, (c) => c.subsidyAmount), subPaid = sum(subs.filter((c) => c.subsidyPaid), (c) => c.subsidyAmount);
+  let nr = 0;
+  const per = o.from || o.to ? `${o.from ? fmtDate(o.from) : 'Beginn'} – ${o.to ? fmtDate(o.to) : fmtDate(today())}` : 'gesamter Zeitraum';
+  const scopeT = { paid: 'bezahlte Rechnungen', all: 'alle Rechnungen', sub: 'geförderte Positionen' }[o.scope];
+  const table = [...groups.entries()].sort((a, b) => (phaseName(a[0]) || '~').localeCompare(phaseName(b[0]) || '~', 'de')).map(([k, list]) => h('table', { class: 'rp-t' },
+    h('caption', {}, phaseName(k) || 'Ohne Gewerk'),
+    h('thead', {}, h('tr', {}, ['Nr', 'Datum', 'Firma / Beschreibung', 'Status', 'Betrag'].map((t, i) => h('th', { class: i === 4 ? 'r' : '' }, t)))),
+    h('tbody', {}, list.map((c) => h('tr', {},
+      h('td', {}, String(++nr)), h('td', {}, fmtDate(c.date)),
+      h('td', {}, h('strong', {}, c.vendor || '–'), h('div', {}, c.title), c.subsidy ? h('div', { class: 'rp-s' }, `Förderfähig ${fmtEUR(c.subsidyAmount)} · ${c.subsidyPaid ? 'ausgezahlt' : 'offen'}`) : null),
+      h('td', {}, (COST_STATES.find((x) => x[0] === c.status)?.[1] || c.status).replace(/^Rechnung /, '') + (c.status === 'bezahlt' && c.paidDate ? ' ' + fmtDate(c.paidDate) : '')),
+      h('td', { class: 'r' }, fmtEUR(c.amount))))),
+    h('tfoot', {}, h('tr', {}, h('td', { colspan: 4 }, 'Zwischensumme'), h('td', { class: 'r' }, fmtEUR(sum(list, (c) => c.amount)))))));
+  // Belege (Fotos und angehängte Bilder)
+  const annex = [];
+  if (o.photos) {
+    for (const c of rows) {
+      const imgs = [];
+      for (const id of c.photos || []) imgs.push(Store.photoPaths(id).full);
+      const files = [];
+      for (const d of docsOfCost(c)) (String(d.mime || '').startsWith('image/') ? imgs.push(d.path) : files.push(d.name));
+      if (!imgs.length && !files.length) continue;
+      const box = h('section', { class: 'rp-a' }, h('h3', {}, `Beleg ${rows.indexOf(c) + 1}: ${c.vendor ? c.vendor + ' – ' : ''}${c.title}`), files.length ? h('p', { class: 'rp-s' }, 'Weitere Anlagen (Datei): ' + files.join(', ')) : null);
+      for (const p of imgs) {
+        const img = h('img', { alt: 'Beleg' });
+        try { const u = await Store.blobURL(p); if (u) { img.src = u; box.append(img); } } catch {}
+      }
+      annex.push(box);
+    }
+  }
+  const ov = h('div', { id: 'report' },
+    h('div', { class: 'rp-bar noprint' },
+      h('button', { type: 'button', class: 'btn', onclick: () => ov.remove() }, icon('chevron_left', { size: 20 }), ' Zurück'),
+      h('button', { type: 'button', class: 'btn primary', onclick: () => { document.body.classList.add('printing'); setTimeout(() => { window.print(); document.body.classList.remove('printing'); }, 50); } }, icon('download', { size: 20 }), ' Drucken / PDF')),
+    h('div', { class: 'rp-page' },
+      h('h1', {}, o.title || 'Kostennachweis'),
+      h('p', { class: 'rp-s' }, `Zeitraum: ${per} · Umfang: ${scopeT} · erstellt am ${fmtDate(today())}`),
+      h('div', { class: 'rp-sum' },
+        h('div', {}, h('span', {}, 'Summe'), h('strong', {}, fmtEUR(total))),
+        h('div', {}, h('span', {}, 'davon bezahlt'), h('strong', {}, fmtEUR(paid))),
+        h('div', {}, h('span', {}, 'noch offen'), h('strong', {}, fmtEUR(openA))),
+        subs.length ? h('div', {}, h('span', {}, 'Förderfähig'), h('strong', {}, fmtEUR(subAll))) : null,
+        subs.length ? h('div', {}, h('span', {}, 'Förderung ausgezahlt'), h('strong', {}, fmtEUR(subPaid))) : null),
+      rows.length ? table : h('p', {}, 'Keine Positionen im gewählten Zeitraum.'),
+      annex.length ? h('h2', { class: 'rp-h2' }, 'Belege') : null, annex));
+  document.body.append(ov);
+  ov.scrollTop = 0;
+}
+function proofSheet() {
+  const dates = Store.all('costs').map((c) => c.date).filter(Boolean).sort();
+  const from = h('input', { type: 'date', value: '' });
+  const to = h('input', { type: 'date', value: '' });
+  const title = h('input', { type: 'text', value: 'Kostennachweis Bauvorhaben' });
+  const scope = h('select', {}, [['paid', 'Bezahlte Rechnungen'], ['all', 'Alle Rechnungen (auch offene)'], ['sub', 'Nur geförderte Positionen']].map(([v, t]) => h('option', { value: v }, t)));
+  const photos = h('input', { type: 'checkbox' });
+  const get = () => ({ from: from.value, to: to.value, title: title.value.trim(), scope: scope.value, photos: photos.checked });
+  const dlg = sheet('Nachweis erstellen', [
+    h('p', { class: 'muted small' }, 'Bericht für Bank oder Förderstelle: Positionen je Gewerk mit Zwischensummen. Angebote sind nicht enthalten.'),
+    field('Titel', title), field('Umfang', scope), field('Von', from), field('Bis', to),
+    h('label', { class: 'check' }, photos, ' Belegfotos anhängen (Rechnungsfotos und Bilder)'),
+    dates.length ? h('p', { class: 'muted small' }, `Belege von ${fmtDate(dates[0])} bis ${fmtDate(dates[dates.length - 1])}. Leer lassen = alles.`) : null,
+    h('div', { class: 'co-btns' },
+      h('button', { type: 'button', class: 'btn', onclick: () => proofCsv(get()) }, icon('download', { size: 20 }), ' CSV (Excel)'))
+  ], { saveLabel: 'Bericht anzeigen', onSave: async () => { setTimeout(() => proofReport(get()), 50); } });
+}
+
 function viewCosts() {
   const all = Store.all('costs');
   const sums = costSums(all);
@@ -1064,7 +1151,8 @@ function viewCosts() {
         )
       : empty('Keine Kosten', fcount ? 'Mit diesen Filtern gibt es nichts. Tippe oben auf „Zurücksetzen“.' : 'Trage Rechnungen, Abschläge und Angebote ein und hänge Belege und Dokumente an.', 'payments'),
   ];
-  return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? summary : invoices, fab(() => costForm()));
+  const proofBtn = h('button', { type: 'button', class: 'btn block', onclick: proofSheet }, icon('description', { size: 20 }), ' Nachweis für Bank / Förderung');
+  return h('div', { class: 'view' }, tabs, costTab === 'auswertung' ? [...summary, proofBtn] : invoices, fab(() => costForm()));
 }
 
 // ---------- Suche ----------
