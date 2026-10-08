@@ -766,6 +766,40 @@ function chartCard(title, chart, legendEl, rows, note) {
   return h('section', { class: 'card chart' }, h('div', { class: 'split' }, h('h3', {}, title), btn), body);
 }
 
+// Variantenvergleich: Budgetangebote je Gewerk gegenüberstellen und die Auswirkung auf das Budget durchrechnen
+const varSel = {};
+function variantCard(all, sums, budget) {
+  const vs = all.filter((c) => c.status === 'budgetangebot');
+  if (!vs.length) return null;
+  const groups = new Map();
+  vs.forEach((c) => { const k = usageById(c.phaseId) ? c.phaseId : ''; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(c); });
+  const gl = [...groups].map(([k, list]) => ({ k, name: k ? phaseName(k) : 'Ohne Zuordnung', list: [...list].sort((a, b) => a.amount - b.amount) }));
+  const base = sums.net + sums.offers;
+  const box = h('section', { class: 'card variants' });
+  const paint = () => {
+    let extra = 0, lo = 0, hi = 0;
+    const groupsEl = gl.map((g) => {
+      const sel = g.list.find((c) => c.id === varSel[g.k]) || g.list[0];
+      extra += sel.amount; lo += g.list[0].amount; hi += g.list[g.list.length - 1].amount;
+      return h('div', { class: 'vgrp' }, h('div', { class: 'vgh' }, g.name),
+        g.list.map((c) => h('button', { type: 'button', class: 'vopt' + (c.id === sel.id ? ' on' : ''), 'aria-pressed': c.id === sel.id ? 'true' : 'false', onclick: () => { varSel[g.k] = c.id; paint(); } },
+          h('span', { class: 'vt' }, c.title, c.vendor ? h('span', { class: 'muted small' }, ' · ' + c.vendor) : null),
+          h('span', { class: 'va' }, fmtEUR(c.amount), c.amount > g.list[0].amount ? h('span', { class: 'muted small' }, ' +' + fmtEUR(c.amount - g.list[0].amount)) : null))));
+    });
+    const total = base + extra, left = budget ? budget - total : null;
+    const row = (l, v, cls) => h('div', { class: 'split vrow' + (cls ? ' ' + cls : '') }, h('span', {}, l), h('strong', {}, v));
+    box.replaceChildren(h('h3', {}, 'Variantenvergleich'), h('p', { class: 'muted small' }, 'Wähle je Gewerk eine Variante. Unten siehst du, wie sich das auf das Budget auswirkt.'), ...groupsEl,
+      h('div', { class: 'vsum' },
+        row('Ausgaben (netto) und Angebote', fmtEUR(base)),
+        row('+ gewählte Varianten', fmtEUR(extra)),
+        row('= Gesamt', fmtEUR(total), 'vtot'),
+        budget ? row(left >= 0 ? 'Vom Budget übrig' : 'Budget überschritten um', fmtEUR(Math.abs(left)), left >= 0 ? 'vok' : 'vbad') : h('p', { class: 'muted small' }, 'Lege oben ein Budget fest, dann siehst du hier, was übrig bleibt.'),
+        gl.some((g) => g.list.length > 1) ? h('p', { class: 'muted small' }, `Spanne über alle Varianten: ${fmtEUR(base + lo)} (günstigste) bis ${fmtEUR(base + hi)} (teuerste).`) : null));
+  };
+  paint();
+  return box;
+}
+
 function costCharts(all, sums, budget) {
   const real = all.filter((c) => !isOffer(c));
   if (!real.length) return h('div', { class: 'card' }, h('p', { class: 'muted' }, 'Sobald Rechnungen eingetragen sind, erscheinen hier die Auswertungen.'));
@@ -857,6 +891,7 @@ function viewCosts() {
             h('span', { class: 'bl' }, p.loan && icon('account_balance', { size: 18 }), p.name, p.loan && p.planned && chip('geplant', 'cs-angebot')), h('span', { class: 'muted' }, fmtEUR(p.amount)), bar(budget ? (p.amount / budget) * 100 : 0)))
         : h('p', { class: 'muted small' }, 'Antippen, um das Budget festzulegen (z. B. Eigenkapital). Darlehen kommen aus „Finanzierung“.'),
       parts.some((p) => p.loan) && h('p', { class: 'muted small' }, 'Darlehen antippen öffnet die Finanzierung.')),
+    variantCard(all, sums, budget),
     costCharts(all, sums, budget),
   ];
   const invoices = [

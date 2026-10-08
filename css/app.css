@@ -644,3 +644,17 @@ dialog.sheet, dialog.sheet .sheet-form { overflow-x: hidden; overscroll-behavior
 .sheet-body input, .sheet-body select, .sheet-body textarea { max-width: 100%; min-width: 0; }
 /* Eingabefelder mindestens 16px, sonst zoomt iOS beim Antippen hinein und die Maske verschiebt sich */
 input, select, textarea { font-size: max(16px, 1em); }
+
+/* Variantenvergleich */
+.variants { display: flex; flex-direction: column; gap: 10px; }
+.vgrp { display: flex; flex-direction: column; gap: 6px; }
+.vgh { font-weight: 650; font-size: .92rem; }
+.vopt { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); min-height: 44px; }
+.vopt.on { border-color: var(--accent); background: var(--accent-soft); }
+.vopt .vt { min-width: 0; overflow-wrap: anywhere; }
+.vopt .va { font-weight: 650; white-space: nowrap; text-align: right; }
+.vsum { display: flex; flex-direction: column; gap: 6px; padding-top: 10px; border-top: 1px solid var(--line); }
+.vrow { align-items: center; }
+.vtot { font-size: 1.05rem; }
+.vok strong { color: var(--ok-ink, #167a4d); }
+.vbad strong { color: var(--bad-ink); }
